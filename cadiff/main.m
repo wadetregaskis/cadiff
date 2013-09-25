@@ -46,7 +46,7 @@ static BOOL computeHashes(NSURL *files,
     }
 
     BOOL allGood = YES;
-    dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(2);
+    dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
     dispatch_queue_t jobQueue = dispatch_queue_create("Job Queue", DISPATCH_QUEUE_SERIAL);
 
     for (NSURL *file in fileEnumerator) {
