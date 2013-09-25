@@ -204,6 +204,9 @@ int main(int argc, char* const argv[]) {
             NSURL *duplicateFile = bHashesToURLs[hash];
 
             if (duplicateFile) {
+                printf("\"%s\" and \"%s\" have the same hash - comparing complete contents to be sure...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                fflush(stdout);
+
                 if ([NSFileManager.defaultManager contentsEqualAtPath:file.path andPath:duplicateFile.path]) {
                     duplicates[file] = duplicateFile;
                 } else {
