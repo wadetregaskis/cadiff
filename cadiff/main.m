@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <openssl/sha.h>
+#include <CommonCrypto/CommonDigest.h>
 
 #import <Foundation/Foundation.h>
 
@@ -69,7 +69,7 @@ static BOOL computeHashes(NSURL *files,
         dispatch_io_set_high_water(fileIO, 64ULL << 20);
         dispatch_io_set_low_water(fileIO, 128ULL << 10);
 
-        SHA_CTX *hashContext = malloc(sizeof(*hashContext));
+        CC_SHA1_CTX *hashContext = malloc(sizeof(*hashContext));
 
         if (!hashContext) {
             fprintf(stderr, "Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
@@ -77,7 +77,7 @@ static BOOL computeHashes(NSURL *files,
             break;
         }
 
-        if (1 != SHA1_Init(hashContext)) {
+        if (1 != CC_SHA1_Init(hashContext)) {
             fprintf(stderr, "Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
             allGood = NO;
             free(hashContext);
@@ -99,7 +99,7 @@ static BOOL computeHashes(NSURL *files,
                                                                size_t offset,
                                                                const void *buffer,
                                                                size_t size) {
-                                                             if (1 == SHA1_Update(hashContext, buffer, size)) {
+                                                             if (1 == CC_SHA1_Update(hashContext, buffer, (CC_LONG)size)) {
                                                                  return true;
                                                              } else {
                                                                  fprintf(stderr, "Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
@@ -108,10 +108,10 @@ static BOOL computeHashes(NSURL *files,
                                                          });
 
                                      if (done) {
-                                         unsigned char hash[SHA_DIGEST_LENGTH];
+                                         unsigned char hash[CC_SHA1_DIGEST_LENGTH];
 
-                                         if (1 == SHA1_Final(hash, hashContext)) {
-                                             NSData *hashAsData = [NSData dataWithBytes:hash length:SHA_DIGEST_LENGTH];
+                                         if (1 == CC_SHA1_Final(hash, hashContext)) {
+                                             NSData *hashAsData = [NSData dataWithBytes:hash length:sizeof(hash)];
 
                                              printf("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
                                              fflush(stdout);
