@@ -6,17 +6,190 @@
 //  Copyright (c) 2013 Wade Tregaskis. All rights reserved.
 //
 
+#include <errno.h>
+#include <fcntl.h>
+#include <getopt.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <openssl/sha.h>
+
 #import <Foundation/Foundation.h>
 
-int main(int argc, const char * argv[])
-{
 
-    @autoreleasepool {
-        
-        // insert code here...
-        NSLog(@"Hello, World!");
-        
-    }
-    return 0;
+#define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
+
+static void usage(const char *invocationString) NOT_NULL(1) {
+    printf("Usage: %s A B\n"
+           "\n"
+           "A and B are two files or two folders to compare.\n",
+           invocationString);
 }
 
+static BOOL computeHashes(NSURL *files,
+                          NSMutableDictionary *URLsToHashes,
+                          NSMutableDictionary *hashesToURLs,
+                          dispatch_queue_t updateQueue,
+                          dispatch_group_t dispatchGroup) NOT_NULL(1, 2, 3) {
+    NSDirectoryEnumerator *fileEnumerator
+        = [[NSFileManager defaultManager] enumeratorAtURL:files
+                               includingPropertiesForKeys:nil
+                                                  options:NSDirectoryEnumerationSkipsHiddenFiles
+                                             errorHandler:^(NSURL *url, NSError *error) {
+        fprintf(stderr, "Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
+        return YES;
+    }];
+
+    if (!fileEnumerator) {
+        fprintf(stderr, "Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
+        return NO;
+    }
+
+    BOOL allGood = YES;
+
+    for (NSURL *file in fileEnumerator) {
+        dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
+                                                            file.path.UTF8String,
+                                                            O_RDONLY | O_NOFOLLOW,
+                                                            0,
+                                                            dispatch_get_main_queue(), ^(int error) {
+                                                                if (0 != error) {
+                                                                    fprintf(stderr, "Error %d reading \"%s\".\n", error, file.path.UTF8String);
+                                                                }
+                                                            });
+
+        if (!fileIO) {
+            fprintf(stderr, "Unable to create I/O stream for \"%s\".\n", file.path.UTF8String);
+            allGood = NO;
+            break;
+        }
+
+        dispatch_io_set_high_water(fileIO, 64ULL << 20);
+        dispatch_io_set_low_water(fileIO, 128ULL << 10);
+
+        SHA_CTX *hashContext = malloc(sizeof(*hashContext));
+
+        if (!hashContext) {
+            fprintf(stderr, "Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
+            allGood = NO;
+            break;
+        }
+
+        if (1 != SHA1_Init(hashContext)) {
+            fprintf(stderr, "Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
+            allGood = NO;
+            free(hashContext);
+            break;
+        }
+
+        dispatch_group_enter(dispatchGroup);
+        dispatch_io_read(fileIO,
+                         0,
+                         SIZE_MAX,
+                         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+                         ^(bool done, dispatch_data_t data, int error) {
+                             if (0 == error) {
+                                 dispatch_data_apply(data,
+                                                     ^bool(dispatch_data_t region,
+                                                           size_t offset,
+                                                           const void *buffer,
+                                                           size_t size) {
+                                                         if (1 == SHA1_Update(hashContext, buffer, size)) {
+                                                             return true;
+                                                         } else {
+                                                             fprintf(stderr, "Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
+                                                             return false;
+                                                         }
+                                                     });
+
+                                 if (done) {
+                                     unsigned char hash[SHA_DIGEST_LENGTH];
+
+                                     if (1 == SHA1_Final(hash, hashContext)) {
+                                         NSData *hashAsData = [NSData dataWithBytes:hash length:SHA_DIGEST_LENGTH];
+
+                                         printf("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
+
+                                         dispatch_async(updateQueue, ^{
+                                             URLsToHashes[file] = hashAsData;
+                                             hashesToURLs[hashAsData] = file;
+                                         });
+                                     } else {
+                                         fprintf(stderr, "Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
+                                     }
+                                 }
+                             } else {
+                                 fprintf(stderr, "Error %d while reading from \"%s\".\n", error, file.path.UTF8String);
+                             }
+
+                             if (done) {
+                                 //dispatch_io_close(fileIO, DISPATCH_IO_STOP);
+                                 free(hashContext);
+                                 dispatch_group_leave(dispatchGroup);
+                             }
+                         });
+    }
+
+    return allGood;
+}
+
+int main(int argc, char* const argv[]) {
+    static const struct option longOptions[] = {
+        {"help",    no_argument,        NULL, 'h'},
+        {NULL,      0,                  NULL, 0}
+    };
+
+    int optionIndex = 0;
+    while (-1 != (optionIndex = getopt_long(argc, argv, "h", longOptions, NULL))) {
+        switch (optionIndex) {
+            case 'h':
+                usage(argv[0]);
+                return 0;
+            default:
+                fprintf(stderr, "Invalid arguments.\n");
+                return EINVAL;
+        }
+    }
+    const char *invocationString = argv[0];
+    argc -= optind;
+    argv += optind;
+
+    if (2 != argc) {
+        usage(invocationString);
+        return EINVAL;
+    }
+
+    @autoreleasepool {
+        NSURL *a = [NSURL fileURLWithPath:[[NSString stringWithUTF8String:argv[0]] stringByExpandingTildeInPath]];
+        NSURL *b = [NSURL fileURLWithPath:[[NSString stringWithUTF8String:argv[1]] stringByExpandingTildeInPath]];
+
+        NSMutableDictionary *aHashesToURLs = [NSMutableDictionary dictionary];
+        NSMutableDictionary *bHashesToURLs = [NSMutableDictionary dictionary];
+        NSMutableDictionary *aURLsToHashes = [NSMutableDictionary dictionary];
+        NSMutableDictionary *bURLsToHashes = [NSMutableDictionary dictionary];
+
+        dispatch_group_t dispatchGroupA = dispatch_group_create();
+        dispatch_group_t dispatchGroupB = dispatch_group_create();
+
+        dispatch_queue_t updateQueue = dispatch_queue_create("Aggregation Queue", DISPATCH_QUEUE_SERIAL);
+
+        if (!computeHashes(a, aURLsToHashes, aHashesToURLs, updateQueue, dispatchGroupA)) {
+            return -1;
+        }
+
+        if (!computeHashes(b, bURLsToHashes, bHashesToURLs, updateQueue, dispatchGroupB)) {
+            return -1;
+        }
+
+        dispatch_group_wait(dispatchGroupA, DISPATCH_TIME_FOREVER);
+        dispatch_group_wait(dispatchGroupB, DISPATCH_TIME_FOREVER);
+
+        printf("Calculated %lu hashes for \"%s\", and %lu for \"%s\".\n",
+               (unsigned long)aHashesToURLs.count,
+               a.path.UTF8String,
+               (unsigned long)bHashesToURLs.count,
+               b.path.UTF8String);
+    }
+
+    return 0;
+}
