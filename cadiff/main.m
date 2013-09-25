@@ -99,7 +99,7 @@ static BOOL computeHashes(NSURL *files,
             dispatch_io_read(fileIO,
                              0,
                              SIZE_MAX,
-                             dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+                             dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0),
                              ^(bool done, dispatch_data_t data, int error) {
                                  if (0 == error) {
                                      dispatch_data_apply(data,
