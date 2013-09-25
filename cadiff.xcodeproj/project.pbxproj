@@ -32,8 +32,6 @@
 		75B27C0A17F29DC400D86FDF /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		75B27C0D17F29DC400D86FDF /* cadiff-Prefix.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "cadiff-Prefix.pch"; sourceTree = "<group>"; };
 		75B27C0E17F29DC400D86FDF /* cadiff.1 */ = {isa = PBXFileReference; lastKnownFileType = text.man; path = cadiff.1; sourceTree = "<group>"; };
-		75B27C1517F2AB9800D86FDF /* libssl.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libssl.dylib; path = usr/lib/libssl.dylib; sourceTree = SDKROOT; };
-		75B27C1717F2AC0E00D86FDF /* libcrypto.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libcrypto.dylib; path = usr/lib/libcrypto.dylib; sourceTree = SDKROOT; };
 		75B27C1917F2BC8700D86FDF /* libcommonCrypto.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libcommonCrypto.dylib; path = usr/lib/system/libcommonCrypto.dylib; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -71,8 +69,6 @@
 			isa = PBXGroup;
 			children = (
 				75B27C1917F2BC8700D86FDF /* libcommonCrypto.dylib */,
-				75B27C1717F2AC0E00D86FDF /* libcrypto.dylib */,
-				75B27C1517F2AB9800D86FDF /* libssl.dylib */,
 				75B27C0717F29DC400D86FDF /* Foundation.framework */,
 			);
 			name = Frameworks;
