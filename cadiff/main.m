@@ -207,6 +207,7 @@ int main(int argc, char* const argv[]) {
                 printf("\"%s\" and \"%s\" have the same hash - comparing complete contents to be sure...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
                 fflush(stdout);
 
+                // TODO: This is *horribly* slow (as in, uses a fraction of available disk bandwidth).  Ugh.  Find another way or just implement it directly.
                 if ([NSFileManager.defaultManager contentsEqualAtPath:file.path andPath:duplicateFile.path]) {
                     duplicates[file] = duplicateFile;
                 } else {
