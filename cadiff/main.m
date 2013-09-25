@@ -66,7 +66,7 @@ static BOOL computeHashes(NSURL *files,
             break;
         }
 
-        dispatch_io_set_high_water(fileIO, 64ULL << 20);
+        dispatch_io_set_high_water(fileIO, 1ULL << 20);
         dispatch_io_set_low_water(fileIO, 128ULL << 10);
 
         CC_SHA1_CTX *hashContext = malloc(sizeof(*hashContext));
