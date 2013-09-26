@@ -58,6 +58,20 @@ static BOOL computeHashes(NSURL *files,
     dispatch_queue_t jobQueue = dispatch_queue_create("Job Queue", DISPATCH_QUEUE_SERIAL);
 
     for (NSURL *file in fileEnumerator) {
+        { // Skip folders (in the try-to-read-them-as-files sense; we will of course recurse into them to find files within.
+            NSError *err = nil;
+            NSNumber *isFolder = nil;
+
+            if ([file getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err]) {
+                if ([isFolder boolValue]) {
+                    printf("Found subfolder \"%s\"...\n", file.path.UTF8String);
+                    continue;
+                }
+            } else {
+                fprintf(stderr, "Unable to determine if \"%s\" is a folder or not (assuming it's not), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
+            }
+        }
+
         dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
                                                             file.path.UTF8String,
                                                             O_RDONLY | O_NOFOLLOW,
