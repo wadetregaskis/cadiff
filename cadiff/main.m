@@ -137,7 +137,6 @@ static BOOL computeHashes(NSURL *files,
                                  }
 
                                  if (done) {
-                                     //dispatch_io_close(fileIO, DISPATCH_IO_STOP);
                                      free(hashContext);
                                      dispatch_group_leave(dispatchGroup);
                                      dispatch_semaphore_signal(concurrencyLimiter);
