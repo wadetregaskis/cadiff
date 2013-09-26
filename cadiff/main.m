@@ -19,6 +19,7 @@
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #include <CommonCrypto/CommonDigest.h>
 
@@ -162,6 +163,68 @@ static BOOL computeHashes(NSURL *files,
     return allGood;
 }
 
+static const void* mapFileAsReadOnly(NSURL *file, off_t *size) {
+    const void *data = NULL;
+    const int fd = open(file.path.UTF8String, O_RDONLY | O_NOFOLLOW);
+
+    if (0 <= fd) {
+        struct stat stats;
+
+        if (0 == fstat(fd, &stats)) {
+            data = mmap(NULL, stats.st_size, PROT_READ, MAP_FILE | MAP_SHARED, fd, 0);
+
+            if (data) {
+                *size = stats.st_size;
+
+                if (0 != madvise((void*)data, stats.st_size, MADV_SEQUENTIAL)) {
+                    fprintf(stderr, "Warning: unable to give the OS the hint that we'll be reading \"%s\" sequentially, error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+                }
+
+                if (0 != madvise((void*)data, stats.st_size, MADV_WILLNEED)) {
+                    fprintf(stderr, "Warning: unable to give the OS the hint that we'll be reading \"%s\" shortly, error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+                }
+            } else {
+                fprintf(stderr, "Unable to map in \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+            }
+        } else {
+            fprintf(stderr, "Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+        }
+
+        if (0 != close(fd)) {
+            fprintf(stderr, "Unable to close \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+        }
+    } else {
+        fprintf(stderr, "Unable to open \"%s\".\n", file.path.UTF8String);
+    }
+
+    return data;
+}
+
+static BOOL compareFiles(NSURL *a, NSURL *b) {
+    BOOL same = NO;
+    off_t aSize = 0;
+    const void *aData = mapFileAsReadOnly(a, &aSize);
+
+    if (aData) {
+        off_t bSize = 0;
+        const void *bData = mapFileAsReadOnly(b, &bSize);
+
+        if (bData) {
+            same = ((aSize == bSize) && (0 == bcmp(aData, bData, aSize)));
+
+            if (0 != munmap((void*)bData, bSize)) {
+                fprintf(stderr, "Unable to unmap \"%s\".\n", b.path.UTF8String);
+            }
+        }
+
+        if (0 != munmap((void*)aData, aSize)) {
+            fprintf(stderr, "Unable to unmap \"%s\".\n", a.path.UTF8String);
+        }
+    }
+
+    return same;
+}
+
 int main(int argc, char* const argv[]) {
     static const struct option longOptions[] = {
         {"help",    no_argument,        NULL, 'h'},
@@ -221,6 +284,9 @@ int main(int argc, char* const argv[]) {
         NSMutableSet *onlyInA = [NSMutableSet set];
         NSMutableSet *onlyInB = [NSMutableSet set];
 
+        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
+        dispatch_queue_t jobQueue = dispatch_queue_create("Compare Job Queue", DISPATCH_QUEUE_SERIAL);
+
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
             NSURL *duplicateFile = bHashesToURLs[hash];
 
@@ -228,16 +294,31 @@ int main(int argc, char* const argv[]) {
                 printf("\"%s\" and \"%s\" have the same hash - comparing complete contents to be sure...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
                 fflush(stdout);
 
-                // TODO: This is *horribly* slow (as in, uses a fraction of available disk bandwidth).  Ugh.  Find another way or just implement it directly.
-                if ([NSFileManager.defaultManager contentsEqualAtPath:file.path andPath:duplicateFile.path]) {
-                    duplicates[file] = duplicateFile;
-                } else {
-                    printf("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
-                }
+                dispatch_group_enter(dispatchGroup);
+
+                dispatch_async(jobQueue, ^{
+                    dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+
+                    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                        if (compareFiles(file, duplicateFile)) {
+                            dispatch_async(updateQueue, ^{
+                                duplicates[file] = duplicateFile;
+                                dispatch_group_leave(dispatchGroup);
+                            });
+                        } else {
+                            printf("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                            dispatch_group_leave(dispatchGroup);
+                        }
+
+                        dispatch_semaphore_signal(concurrencyLimiter);
+                    });
+                });
             } else {
                 [onlyInA addObject:file];
             }
         }];
+
+        dispatch_group_wait(dispatchGroup, DISPATCH_TIME_FOREVER);
 
         [bURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
             NSURL *duplicateFile = aHashesToURLs[hash];
