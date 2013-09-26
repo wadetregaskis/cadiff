@@ -55,7 +55,7 @@ static BOOL computeHashes(NSURL *files,
 
     BOOL allGood = YES;
     dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
-    dispatch_queue_t jobQueue = dispatch_queue_create("Job Queue", DISPATCH_QUEUE_SERIAL);
+    dispatch_queue_t jobQueue = dispatch_queue_create("Hash Job Queue", DISPATCH_QUEUE_SERIAL);
 
     for (NSURL *file in fileEnumerator) {
         { // Skip folders (in the try-to-read-them-as-files sense; we will of course recurse into them to find files within.
