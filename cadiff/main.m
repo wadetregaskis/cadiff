@@ -71,12 +71,15 @@ static BOOL computeHashes(NSURL *files,
                           NSMutableDictionary *hashesToURLs,
                           dispatch_queue_t updateQueue,
                           dispatch_group_t dispatchGroup) NOT_NULL(1, 2, 3) {
+    __block BOOL allGood = YES;
+
     NSDirectoryEnumerator *fileEnumerator
         = [NSFileManager.defaultManager enumeratorAtURL:files
                              includingPropertiesForKeys:nil
                                                 options:NSDirectoryEnumerationSkipsHiddenFiles
                                            errorHandler:^(NSURL *url, NSError *error) {
         fprintf(stderr, "Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
+        allGood = NO;
         return YES;
     }];
 
@@ -85,11 +88,14 @@ static BOOL computeHashes(NSURL *files,
         return NO;
     }
 
-    BOOL allGood = YES;
     dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
     dispatch_queue_t jobQueue = dispatch_queue_create("Hash Job Queue", DISPATCH_QUEUE_SERIAL);
 
     for (NSURL *file in fileEnumerator) {
+        if (!allGood) {
+            break;
+        }
+
         { // Skip folders (in the try-to-read-them-as-files sense; we will of course recurse into them to find files within.
             NSError *err = nil;
             NSNumber *isFolder = nil;
