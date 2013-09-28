@@ -69,7 +69,6 @@ static dispatch_io_t openFile(NSURL *file) {
 static void computeHashes(NSURL *files,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
-                          dispatch_semaphore_t concurrencyLimiter,
                           dispatch_queue_t syncQueue,
                           void (^completionBlock)(BOOL)) NOT_NULL(1, 2, 3) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
@@ -93,6 +92,7 @@ static void computeHashes(NSURL *files,
             return;
         }
 
+        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_queue_t jobQueue = dispatch_queue_create("Hash Job Queue", DISPATCH_QUEUE_SERIAL);
 
@@ -410,7 +410,6 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         NSMutableDictionary *aURLsToHashes = [NSMutableDictionary dictionary];
         NSMutableDictionary *bURLsToHashes = [NSMutableDictionary dictionary];
 
-        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(8);
         dispatch_queue_t syncQueue = dispatch_queue_create("Sync Queue", DISPATCH_QUEUE_SERIAL);
 
         printf("Indexing"); fflush(stdout);
@@ -419,7 +418,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
         __block BOOL successful = YES;
 
-        computeHashes(a, aURLsToHashes, aHashesToURLs, concurrencyLimiter, syncQueue, ^(BOOL allGood) {
+        computeHashes(a, aURLsToHashes, aHashesToURLs, syncQueue, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -427,7 +426,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             dispatch_semaphore_signal(aHashingDone);
         });
 
-        computeHashes(b, bURLsToHashes, bHashesToURLs, concurrencyLimiter, syncQueue, ^(BOOL allGood) {
+        computeHashes(b, bURLsToHashes, bHashesToURLs, syncQueue, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -461,6 +460,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         printf("Comparing suspects"); fflush(stdout);
 
         dispatch_group_t dispatchGroup = dispatch_group_create();
+        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
             NSURL *duplicateFile = bHashesToURLs[hash];
