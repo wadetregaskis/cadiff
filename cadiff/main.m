@@ -26,6 +26,14 @@
 #import <Foundation/Foundation.h>
 
 
+// Flags
+static int fBenchmark = NO;
+static int fDebug = NO;
+static int fVerify = NO;
+
+
+#define LOG_DEBUG(format, ...) ({ if (fDebug) { printf(format, ## __VA_ARGS__); } })
+
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
 static void usage(const char *invocationString) NOT_NULL(1) {
@@ -33,6 +41,29 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            "\n"
            "A and B are two files or two folders to compare.\n",
            invocationString);
+}
+
+static dispatch_io_t openFile(NSURL *file) {
+    dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
+                                                        file.path.UTF8String,
+                                                        O_RDONLY | O_NOFOLLOW,
+                                                        0,
+                                                        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+                                                        ^(int error) {
+                                                            if (0 != error) {
+                                                                fprintf(stderr, "Error %d reading \"%s\".\n", error, file.path.UTF8String);
+                                                            }
+                                                        });
+
+    if (!fileIO) {
+        fprintf(stderr, "Unable to create I/O stream for \"%s\".\n", file.path.UTF8String);
+        return NULL;
+    }
+
+    dispatch_io_set_high_water(fileIO, 1ULL << 20);
+    dispatch_io_set_low_water(fileIO, 128ULL << 10);
+
+    return fileIO;
 }
 
 static BOOL computeHashes(NSURL *files,
@@ -65,7 +96,7 @@ static BOOL computeHashes(NSURL *files,
 
             if ([file getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err]) {
                 if ([isFolder boolValue]) {
-                    printf("Found subfolder \"%s\"...\n", file.path.UTF8String);
+                    LOG_DEBUG("Found subfolder \"%s\"...\n", file.path.UTF8String);
                     continue;
                 }
             } else {
@@ -73,24 +104,12 @@ static BOOL computeHashes(NSURL *files,
             }
         }
 
-        dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
-                                                            file.path.UTF8String,
-                                                            O_RDONLY | O_NOFOLLOW,
-                                                            0,
-                                                            dispatch_get_main_queue(), ^(int error) {
-                                                                if (0 != error) {
-                                                                    fprintf(stderr, "Error %d reading \"%s\".\n", error, file.path.UTF8String);
-                                                                }
-                                                            });
+        dispatch_io_t fileIO = openFile(file);
 
         if (!fileIO) {
-            fprintf(stderr, "Unable to create I/O stream for \"%s\".\n", file.path.UTF8String);
             allGood = NO;
             break;
         }
-
-        dispatch_io_set_high_water(fileIO, 1ULL << 20);
-        dispatch_io_set_low_water(fileIO, 128ULL << 10);
 
         CC_SHA1_CTX *hashContext = malloc(sizeof(*hashContext));
 
@@ -136,8 +155,11 @@ static BOOL computeHashes(NSURL *files,
                                          if (1 == CC_SHA1_Final(hash, hashContext)) {
                                              NSData *hashAsData = [NSData dataWithBytes:hash length:sizeof(hash)];
 
-                                             printf("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
-                                             fflush(stdout);
+                                             if (fDebug) {
+                                                 LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
+                                             } else {
+                                                 printf("."); fflush(stdout);
+                                             }
 
                                              dispatch_sync(updateQueue, ^{
                                                  URLsToHashes[file] = hashAsData;
@@ -163,63 +185,142 @@ static BOOL computeHashes(NSURL *files,
     return allGood;
 }
 
-static const void* mapFileAsReadOnly(NSURL *file, off_t *size) {
-    const void *data = NULL;
-    const int fd = open(file.path.UTF8String, O_RDONLY | O_NOFOLLOW);
+static off_t sizeOfFile(NSURL *file) {
+    struct stat stats;
 
-    if (0 <= fd) {
-        struct stat stats;
-
-        if (0 == fstat(fd, &stats)) {
-            data = mmap(NULL, stats.st_size, PROT_READ, MAP_FILE | MAP_SHARED, fd, 0);
-
-            if (data) {
-                *size = stats.st_size;
-
-                if (0 != madvise((void*)data, stats.st_size, MADV_SEQUENTIAL)) {
-                    fprintf(stderr, "Warning: unable to give the OS the hint that we'll be reading \"%s\" sequentially, error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-                }
-
-                if (0 != madvise((void*)data, stats.st_size, MADV_WILLNEED)) {
-                    fprintf(stderr, "Warning: unable to give the OS the hint that we'll be reading \"%s\" shortly, error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-                }
-            } else {
-                fprintf(stderr, "Unable to map in \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-            }
-        } else {
-            fprintf(stderr, "Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-        }
-
-        if (0 != close(fd)) {
-            fprintf(stderr, "Unable to close \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-        }
+    if (0 == lstat(file.path.UTF8String, &stats)) {
+        return stats.st_size;
     } else {
-        fprintf(stderr, "Unable to open \"%s\".\n", file.path.UTF8String);
+        fprintf(stderr, "Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+        return OFF_MIN;
     }
-
-    return data;
 }
 
 static BOOL compareFiles(NSURL *a, NSURL *b) {
-    BOOL same = NO;
-    off_t aSize = 0;
-    const void *aData = mapFileAsReadOnly(a, &aSize);
+    if ([a isEqual:b]) {
+        return YES;
+    }
 
-    if (aData) {
-        off_t bSize = 0;
-        const void *bData = mapFileAsReadOnly(b, &bSize);
+    off_t aSize = sizeOfFile(a);
 
-        if (bData) {
-            same = ((aSize == bSize) && (0 == bcmp(aData, bData, aSize)));
+    if ((0 > aSize) || (aSize != sizeOfFile(b))) {
+        return NO;
+    }
 
-            if (0 != munmap((void*)bData, bSize)) {
-                fprintf(stderr, "Unable to unmap \"%s\".\n", b.path.UTF8String);
-            }
+    __block BOOL same = NO;
+
+    dispatch_io_t aIO = openFile(a);
+
+    if (aIO) {
+        dispatch_io_t bIO = openFile(b);
+
+        if (bIO) {
+            dispatch_queue_t compareQueue = dispatch_queue_create("Compare Queue", DISPATCH_QUEUE_SERIAL);
+            __block dispatch_data_t aData, bData;
+
+            same = YES;
+            dispatch_semaphore_t doneNotification = dispatch_semaphore_create(0);
+
+            void (^ioHandler)(dispatch_data_t, BOOL, NSURL*) = ^(dispatch_data_t data, BOOL done, NSURL *file) {
+                dispatch_async(compareQueue, ^{
+                    if (file == a) {
+                        aData = (aData ? dispatch_data_create_concat(aData, data) : data);
+                    } else {
+                        bData = (bData ? dispatch_data_create_concat(bData, data) : data);
+                    }
+
+                    const size_t aDataSize = (aData ? dispatch_data_get_size(aData) : 0);
+
+                    if (0 < aDataSize) {
+                        const size_t bDataSize = (bData ? dispatch_data_get_size(bData) : 0);
+
+                        if (0 < bDataSize) {
+                            __block size_t consumed = 0;
+
+                            dispatch_data_apply(aData, ^bool(dispatch_data_t aRegion, size_t aOffset, const void *aBuffer, size_t aSize) {
+                                dispatch_data_apply(bData, ^bool(dispatch_data_t bRegion, size_t bOffset, const void *bBuffer, size_t bSize) {
+                                    if ((bOffset >= (aOffset + aSize)) || (aOffset >= (bOffset + bSize))) {
+                                        return false;
+                                    }
+
+                                    const size_t aLocalOffset = bOffset - aOffset;
+                                    const size_t size = MIN(aSize - aLocalOffset, bSize);
+
+                                    if (0 == bcmp(aBuffer + aLocalOffset, bBuffer, size)) {
+                                        consumed += size;
+                                        return true;
+                                    } else {
+                                        dispatch_io_close(aIO, DISPATCH_IO_STOP);
+                                        dispatch_io_close(bIO, DISPATCH_IO_STOP);
+                                        same = NO;
+                                        return false;
+                                    }
+                                });
+
+                                if (same) {
+                                    return (consumed >= aSize);
+                                } else {
+                                    return false;
+                                }
+                            });
+
+                            if (same) {
+                                assert((aDataSize == consumed) || (bDataSize == consumed));
+
+                                aData = dispatch_data_create_subrange(aData, consumed, aDataSize - consumed);
+                                bData = dispatch_data_create_subrange(bData, consumed, bDataSize - consumed);
+                            }
+                        }
+                    }
+
+                    if (done) {
+                        dispatch_semaphore_signal(doneNotification);
+                    }
+                });
+            };
+
+            dispatch_io_read(aIO,
+                             0,
+                             SIZE_MAX,
+                             dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0),
+                             ^(bool done, dispatch_data_t data, int error) {
+                                 if (0 == error) {
+                                     dispatch_async(compareQueue, ^{
+                                         ioHandler(data, done, a);
+                                     });
+                                 } else {
+                                     if (ECANCELED != error) {
+                                         fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), a.path.UTF8String);
+                                     }
+                                     dispatch_semaphore_signal(doneNotification);
+                                 }
+                             });
+
+            dispatch_io_read(bIO,
+                             0,
+                             SIZE_MAX,
+                             dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0),
+                             ^(bool done, dispatch_data_t data, int error) {
+                                 if (0 == error) {
+                                     dispatch_async(compareQueue, ^{
+                                         ioHandler(data, done, b);
+                                     });
+                                 } else {
+                                     if (ECANCELED != error) {
+                                         fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), b.path.UTF8String);
+                                     }
+                                     dispatch_semaphore_signal(doneNotification);
+                                 }
+                             });
+
+            dispatch_semaphore_wait(doneNotification, DISPATCH_TIME_FOREVER);
+        } else {
+            dispatch_io_close(aIO, DISPATCH_IO_STOP);
         }
+    }
 
-        if (0 != munmap((void*)aData, aSize)) {
-            fprintf(stderr, "Unable to unmap \"%s\".\n", a.path.UTF8String);
-        }
+    if (fVerify) {
+        assert(same == [NSFileManager.defaultManager contentsEqualAtPath:a.path andPath:b.path]);
     }
 
     return same;
@@ -227,18 +328,24 @@ static BOOL compareFiles(NSURL *a, NSURL *b) {
 
 int main(int argc, char* const argv[]) {
     static const struct option longOptions[] = {
-        {"help",    no_argument,        NULL, 'h'},
-        {NULL,      0,                  NULL, 0}
+        {"benchmark",   no_argument,    &fBenchmark,    YES},
+        {"debug",       no_argument,    &fDebug,        YES},
+        {"help",        no_argument,    NULL,           'h'},
+        {"verify",      no_argument,    &fVerify,       YES},
+        {NULL,          0,              NULL,           0}
     };
 
     int optionIndex = 0;
     while (-1 != (optionIndex = getopt_long(argc, argv, "h", longOptions, NULL))) {
         switch (optionIndex) {
+            case 0:
+                // One of our boolean flags, that sets the global variable directly.  All good.
+                break;
             case 'h':
                 usage(argv[0]);
                 return 0;
             default:
-                fprintf(stderr, "Invalid arguments.\n");
+                fprintf(stderr, "Invalid arguments (%d).\n", optionIndex);
                 return EINVAL;
         }
     }
@@ -249,6 +356,18 @@ int main(int argc, char* const argv[]) {
     if (2 != argc) {
         usage(invocationString);
         return EINVAL;
+    }
+
+    if (fBenchmark) {
+        printf("Benchmark mode - disk caches will be purged before each major step.\n");
+    }
+
+    if (fVerify) {
+        printf("File comparison algorithm will be verified by using a known-good (but slower) method too.\n");
+    }
+
+    if (fBenchmark) {
+        assert(0 == system("/usr/bin/purge"));
     }
 
     @autoreleasepool {
@@ -264,6 +383,8 @@ int main(int argc, char* const argv[]) {
 
         dispatch_queue_t updateQueue = dispatch_queue_create("Aggregation Queue", DISPATCH_QUEUE_SERIAL);
 
+        printf("Indexing");
+
         if (!computeHashes(a, aURLsToHashes, aHashesToURLs, updateQueue, dispatchGroup)) {
             return -1;
         }
@@ -274,25 +395,36 @@ int main(int argc, char* const argv[]) {
 
         dispatch_group_wait(dispatchGroup, DISPATCH_TIME_FOREVER);
 
-        printf("Calculated %lu hashes for \"%s\", and %lu for \"%s\".\n",
-               (unsigned long)aHashesToURLs.count,
-               a.path.UTF8String,
-               (unsigned long)bHashesToURLs.count,
-               b.path.UTF8String);
+        printf("\n");
+
+        LOG_DEBUG("Calculated %lu hashes for \"%s\", and %lu for \"%s\".\n",
+                  (unsigned long)aHashesToURLs.count,
+                  a.path.UTF8String,
+                  (unsigned long)bHashesToURLs.count,
+                  b.path.UTF8String);
 
         NSMutableDictionary *duplicates = [NSMutableDictionary dictionary];
         NSMutableSet *onlyInA = [NSMutableSet set];
         NSMutableSet *onlyInB = [NSMutableSet set];
 
+        if (fBenchmark) {
+            assert(0 == system("/usr/bin/purge"));
+        }
+
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
         dispatch_queue_t jobQueue = dispatch_queue_create("Compare Job Queue", DISPATCH_QUEUE_SERIAL);
+
+        printf("Comparing suspects");
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
             NSURL *duplicateFile = bHashesToURLs[hash];
 
             if (duplicateFile) {
-                printf("\"%s\" and \"%s\" have the same hash - comparing complete contents to be sure...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
-                fflush(stdout);
+                if (fDebug) {
+                    LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                } else {
+                    printf("."); fflush(stdout);
+                }
 
                 dispatch_group_enter(dispatchGroup);
 
@@ -306,7 +438,7 @@ int main(int argc, char* const argv[]) {
                                 dispatch_group_leave(dispatchGroup);
                             });
                         } else {
-                            printf("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                            LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
                             dispatch_group_leave(dispatchGroup);
                         }
 
@@ -328,7 +460,7 @@ int main(int argc, char* const argv[]) {
             }
         }];
 
-        printf("\n");
+        printf("\n\n");
 
         if (0 < duplicates.count) {
             printf("Duplicates:\n");
