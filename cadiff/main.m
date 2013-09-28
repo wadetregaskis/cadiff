@@ -148,7 +148,7 @@ static void computeHashes(NSURL *files,
                 dispatch_io_read(fileIO,
                                  0,
                                  SIZE_MAX,
-                                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0),
+                                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
                                  ^(bool done, dispatch_data_t data, int error) {
                                      if (!done && !allGood) {
                                          dispatch_io_close(fileIO, DISPATCH_IO_STOP);
