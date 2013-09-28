@@ -69,7 +69,8 @@ static dispatch_io_t openFile(NSURL *file) {
 static BOOL computeHashes(NSURL *files,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
-                          dispatch_queue_t updateQueue,
+                          dispatch_queue_t syncQueue,
+                          dispatch_semaphore_t concurrencyLimiter,
                           dispatch_group_t dispatchGroup) NOT_NULL(1, 2, 3) {
     __block BOOL allGood = YES;
 
@@ -88,7 +89,6 @@ static BOOL computeHashes(NSURL *files,
         return NO;
     }
 
-    dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
     dispatch_queue_t jobQueue = dispatch_queue_create("Hash Job Queue", DISPATCH_QUEUE_SERIAL);
 
     for (NSURL *file in fileEnumerator) {
@@ -167,7 +167,7 @@ static BOOL computeHashes(NSURL *files,
                                                  printf("."); fflush(stdout);
                                              }
 
-                                             dispatch_async(updateQueue, ^{
+                                             dispatch_async(syncQueue, ^{
                                                  URLsToHashes[file] = hashAsData;
                                                  hashesToURLs[hashAsData] = file;
                                                  dispatch_group_leave(dispatchGroup);
@@ -391,16 +391,16 @@ int main(int argc, char* const argv[]) {
         NSMutableDictionary *bURLsToHashes = [NSMutableDictionary dictionary];
 
         dispatch_group_t dispatchGroup = dispatch_group_create();
-
-        dispatch_queue_t updateQueue = dispatch_queue_create("Aggregation Queue", DISPATCH_QUEUE_SERIAL);
+        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(8);
+        dispatch_queue_t syncQueue = dispatch_queue_create("Sync Queue", DISPATCH_QUEUE_SERIAL);
 
         printf("Indexing"); fflush(stdout);
 
-        if (!computeHashes(a, aURLsToHashes, aHashesToURLs, updateQueue, dispatchGroup)) {
+        if (!computeHashes(a, aURLsToHashes, aHashesToURLs, syncQueue, concurrencyLimiter, dispatchGroup)) {
             return -1;
         }
 
-        if (!computeHashes(b, bURLsToHashes, bHashesToURLs, updateQueue, dispatchGroup)) {
+        if (!computeHashes(b, bURLsToHashes, bHashesToURLs, syncQueue, concurrencyLimiter, dispatchGroup)) {
             return -1;
         }
 
@@ -422,9 +422,6 @@ int main(int argc, char* const argv[]) {
             assert(0 == system("/usr/bin/purge"));
         }
 
-        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
-        dispatch_queue_t jobQueue = dispatch_queue_create("Compare Job Queue", DISPATCH_QUEUE_SERIAL);
-
         printf("Comparing suspects"); fflush(stdout);
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
@@ -439,12 +436,12 @@ int main(int argc, char* const argv[]) {
 
                 dispatch_group_enter(dispatchGroup);
 
-                dispatch_async(jobQueue, ^{
+                dispatch_async(syncQueue, ^{
                     dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
 
                     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                         if (compareFiles(file, duplicateFile)) {
-                            dispatch_async(updateQueue, ^{
+                            dispatch_async(syncQueue, ^{
                                 duplicates[file] = duplicateFile;
                                 dispatch_group_leave(dispatchGroup);
                             });
