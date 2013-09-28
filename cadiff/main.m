@@ -216,7 +216,7 @@ static void computeHashes(NSURL *files,
     });
 }
 
-static off_t sizeOfFile(NSURL *file) {
+static off_t sizeOfFile(NSURL *file) NOT_NULL(1) {
     struct stat stats;
 
     if (0 == lstat(file.path.UTF8String, &stats)) {
@@ -227,7 +227,7 @@ static off_t sizeOfFile(NSURL *file) {
     }
 }
 
-static BOOL compareFiles(NSURL *a, NSURL *b) {
+static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
     if ([a isEqual:b]) {
         return YES;
     }
@@ -357,7 +357,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) {
     return same;
 }
 
-int main(int argc, char* const argv[]) {
+int main(int argc, char* const argv[]) NOT_NULL(2) {
     static const struct option longOptions[] = {
         {"benchmark",   no_argument,    &fBenchmark,    YES},
         {"debug",       no_argument,    &fDebug,        YES},
