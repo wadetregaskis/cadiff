@@ -51,7 +51,7 @@ static dispatch_io_t openFile(NSURL *file) {
                                                         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
                                                         ^(int error) {
                                                             if (0 != error) {
-                                                                fprintf(stderr, "Error %d reading \"%s\".\n", error, file.path.UTF8String);
+                                                                fprintf(stderr, "Error %d (%s) reading \"%s\".\n", error, strerror(error), file.path.UTF8String);
                                                             }
                                                         });
 
@@ -178,7 +178,7 @@ static BOOL computeHashes(NSURL *files,
                                          }
                                      }
                                  } else {
-                                     fprintf(stderr, "Error %d while reading from \"%s\".\n", error, file.path.UTF8String);
+                                     fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), file.path.UTF8String);
                                  }
 
                                  if (done) {
