@@ -151,6 +151,8 @@ static BOOL computeHashes(NSURL *files,
                                                                  return true;
                                                              } else {
                                                                  fprintf(stderr, "Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
+                                                                 allGood = NO;
+                                                                 dispatch_io_close(fileIO, DISPATCH_IO_STOP);
                                                                  return false;
                                                              }
                                                          });
@@ -177,7 +179,7 @@ static BOOL computeHashes(NSURL *files,
                                              dispatch_group_leave(dispatchGroup);
                                          }
                                      }
-                                 } else {
+                                 } else if (ECANCELED != error) {
                                      fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), file.path.UTF8String);
                                  }
 
