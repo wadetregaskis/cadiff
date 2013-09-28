@@ -161,12 +161,14 @@ static BOOL computeHashes(NSURL *files,
                                                  printf("."); fflush(stdout);
                                              }
 
-                                             dispatch_sync(updateQueue, ^{
+                                             dispatch_async(updateQueue, ^{
                                                  URLsToHashes[file] = hashAsData;
                                                  hashesToURLs[hashAsData] = file;
+                                                 dispatch_group_leave(dispatchGroup);
                                              });
                                          } else {
                                              fprintf(stderr, "Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
+                                             dispatch_group_leave(dispatchGroup);
                                          }
                                      }
                                  } else {
@@ -175,8 +177,11 @@ static BOOL computeHashes(NSURL *files,
 
                                  if (done) {
                                      free(hashContext);
-                                     dispatch_group_leave(dispatchGroup);
                                      dispatch_semaphore_signal(concurrencyLimiter);
+
+                                     if (0 != error) {
+                                         dispatch_group_leave(dispatchGroup);
+                                     }
                                  }
                              });
         });
