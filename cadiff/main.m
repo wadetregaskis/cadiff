@@ -46,7 +46,7 @@ static void usage(const char *invocationString) NOT_NULL(1) {
 static dispatch_io_t openFile(NSURL *file) {
     dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
                                                         file.path.UTF8String,
-                                                        O_RDONLY | O_NOFOLLOW,
+                                                        O_RDONLY | O_NOFOLLOW | O_NONBLOCK,
                                                         0,
                                                         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
                                                         ^(int error) {
