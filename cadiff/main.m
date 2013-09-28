@@ -388,7 +388,7 @@ int main(int argc, char* const argv[]) {
 
         dispatch_queue_t updateQueue = dispatch_queue_create("Aggregation Queue", DISPATCH_QUEUE_SERIAL);
 
-        printf("Indexing");
+        printf("Indexing"); fflush(stdout);
 
         if (!computeHashes(a, aURLsToHashes, aHashesToURLs, updateQueue, dispatchGroup)) {
             return -1;
@@ -419,7 +419,7 @@ int main(int argc, char* const argv[]) {
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
         dispatch_queue_t jobQueue = dispatch_queue_create("Compare Job Queue", DISPATCH_QUEUE_SERIAL);
 
-        printf("Comparing suspects");
+        printf("Comparing suspects"); fflush(stdout);
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
             NSURL *duplicateFile = bHashesToURLs[hash];
