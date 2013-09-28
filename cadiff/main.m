@@ -166,7 +166,7 @@ static BOOL computeHashes(NSURL *files,
                                              if (fDebug) {
                                                  LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
                                              } else {
-                                                 printf("."); fflush(stdout);
+                                                 printf("⎍"); fflush(stdout);
                                              }
 
                                              dispatch_async(syncQueue, ^{
@@ -430,11 +430,7 @@ int main(int argc, char* const argv[]) {
             NSURL *duplicateFile = bHashesToURLs[hash];
 
             if (duplicateFile) {
-                if (fDebug) {
-                    LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
-                } else {
-                    printf("."); fflush(stdout);
-                }
+                LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
 
                 dispatch_group_enter(dispatchGroup);
 
@@ -443,12 +439,19 @@ int main(int argc, char* const argv[]) {
 
                     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                         if (compareFiles(file, duplicateFile)) {
+                            printf("▲"); fflush(stdout);
+
                             dispatch_async(syncQueue, ^{
                                 duplicates[file] = duplicateFile;
                                 dispatch_group_leave(dispatchGroup);
                             });
                         } else {
-                            LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                            if (fDebug) {
+                                LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                            } else {
+                                printf("△"); fflush(stdout);
+                            }
+
                             dispatch_group_leave(dispatchGroup);
                         }
 
