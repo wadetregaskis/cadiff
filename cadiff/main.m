@@ -60,7 +60,7 @@ static dispatch_io_t openFile(NSURL *file) {
         return NULL;
     }
 
-    dispatch_io_set_high_water(fileIO, 1ULL << 20);
+    dispatch_io_set_high_water(fileIO, 16ULL << 20);
     dispatch_io_set_low_water(fileIO, 128ULL << 10);
 
     return fileIO;
