@@ -33,6 +33,7 @@
 		75B27C0D17F29DC400D86FDF /* cadiff-Prefix.pch */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "cadiff-Prefix.pch"; sourceTree = "<group>"; };
 		75B27C0E17F29DC400D86FDF /* cadiff.1 */ = {isa = PBXFileReference; lastKnownFileType = text.man; path = cadiff.1; sourceTree = "<group>"; };
 		75B27C1917F2BC8700D86FDF /* libcommonCrypto.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libcommonCrypto.dylib; path = usr/lib/system/libcommonCrypto.dylib; sourceTree = SDKROOT; };
+		75BC93EE17F8C9EE008178E6 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = text; path = README.md; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -88,6 +89,7 @@
 			isa = PBXGroup;
 			children = (
 				75B27C0D17F29DC400D86FDF /* cadiff-Prefix.pch */,
+				75BC93EE17F8C9EE008178E6 /* README.md */,
 			);
 			name = "Supporting Files";
 			sourceTree = "<group>";
@@ -263,6 +265,7 @@
 				75B27C1417F29DC400D86FDF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
 	};
