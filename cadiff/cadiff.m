@@ -82,22 +82,35 @@ static void computeHashes(NSURL *files,
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL allGood = YES;
 
-        NSDirectoryEnumerator *fileEnumerator
-            = [NSFileManager.defaultManager enumeratorAtURL:files
-                                 includingPropertiesForKeys:nil
-                                                    options:NSDirectoryEnumerationSkipsHiddenFiles
-                                               errorHandler:^(NSURL *url, NSError *error) {
-            fprintf(stderr, "Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
-            allGood = NO;
-            return NO;
-        }];
+        NSNumber *isFolder = nil;
+        NSError *err = nil;
+        id fileEnumerator = nil;
+
+        if ([files getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
+            if (![isFolder boolValue]) {
+                fileEnumerator = @[files];
+            }
+        } else {
+            fprintf(stderr, "Unable to determine if \"%s\" is a folder or a file.  Assuming it's a folder.  Specific error was: %s\n", files.path.UTF8String, err.localizedDescription.UTF8String);
+        }
 
         if (!fileEnumerator) {
-            fprintf(stderr, "Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
-            dispatch_async(syncQueue, ^{
-                completionBlock(NO);
-            });
-            return;
+            fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
+                                                includingPropertiesForKeys:nil
+                                                                   options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                              errorHandler:^(NSURL *url, NSError *error) {
+                fprintf(stderr, "Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
+                allGood = NO;
+                return NO;
+            }];
+
+            if (!fileEnumerator) {
+                fprintf(stderr, "Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
+                dispatch_async(syncQueue, ^{
+                    completionBlock(NO);
+                });
+                return;
+            }
         }
 
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
@@ -110,9 +123,6 @@ static void computeHashes(NSURL *files,
             }
 
             { // Skip folders (in the try-to-read-them-as-files sense; we will of course recurse into them to find files within.
-                NSError *err = nil;
-                NSNumber *isFolder = nil;
-
                 if ([file getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err]) {
                     if ([isFolder boolValue]) {
                         LOG_DEBUG("Found subfolder \"%s\"...\n", file.path.UTF8String);
