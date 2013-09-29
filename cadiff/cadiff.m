@@ -141,6 +141,7 @@ static void computeHashes(NSURL *files,
             dispatch_group_enter(dispatchGroup);
             dispatch_async(jobQueue, ^{
                 if (!allGood) {
+                    dispatch_group_leave(dispatchGroup);
                     return;
                 }
 
