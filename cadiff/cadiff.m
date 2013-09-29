@@ -186,8 +186,14 @@ static void computeHashes(NSURL *files,
                                                  }
 
                                                  dispatch_async(syncQueue, ^{
-                                                     URLsToHashes[file] = hashAsData;
-                                                     hashesToURLs[hashAsData] = file;
+                                                     if (hashesToURLs[hashAsData]) {
+                                                         fprintf(stderr, "Hash collision between \"%s\" and \"%s\".\n", ((NSURL*)hashesToURLs[hashAsData]).path.UTF8String, file.path.UTF8String);
+                                                         allGood = NO;
+                                                     } else {
+                                                         URLsToHashes[file] = hashAsData;
+                                                         hashesToURLs[hashAsData] = file;
+                                                     }
+
                                                      dispatch_group_leave(dispatchGroup);
                                                  });
                                              } else {
