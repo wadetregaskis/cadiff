@@ -21,3 +21,4 @@ Normal 2-clause BSD.  See the top of main.m for details.
 * Optimise the indexing (hashing) step by doing multiple passes.  i.e. first hash only the first 4K of each file, then for all the conflicting ones, hash e.g. the next 1 MiB, etc.  This is just a further optimisation of the existing method of hashing only a subset of the file (1 MiB by default) that might be able to further reduce overall I/O while dealing with hash conflicts gracefully.
 * Figure out why there appears to be some kind of serialisation occurring, in batches of concurrencyLimiter size.
 * Figure out why bandwidth utilisation of the SD card slot, as a percentage, seems inversely proportionate with internal disks'.  i.e. you can get 0 MB/s and 400 MB/s respectively, or 10 MB/s and 200 MB/s, or 20 MB/s and 20 MB/s, but not the obvious 20 MB/s and 400 MB/s.
+* Handle hash collisions (between files in the same set) gracefully, rather than just aborting.
