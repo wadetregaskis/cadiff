@@ -37,9 +37,16 @@ static int fVerify = NO;
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
 static void usage(const char *invocationString) NOT_NULL(1) {
-    printf("Usage: %s A B\n"
+    printf("Usage: %s [FLAGS] A B\n"
            "\n"
-           "A and B are two files or two folders to compare.\n",
+           "A and B are two files or two folders to compare.\n"
+           "\n"
+           "Flags:\n"
+           "\t--benchmark\t\t\"Benchmark\" mode, where file system caches are purged prior to each main step (to make successive runs more consistent and better show how much real I/O is being performed).\n"
+           "\t--debug\t\t\tOutput additional logging, intended for debugging.\n"
+           "\t--hashInputSizeLimit\tThe maximum number of bytes to use from each file for computing its hash.  Smaller values make the \"indexing\" stage go faster, and are thus good for working with very many files or where most files are not duplicates, but increases the risk of encountering a hash collision, which will abort the program.  Defaults to 1 MiB.\n"
+           "\t--help\t\t\tPrint this usage information and exit.\n"
+           "\t--verify\t\tVerify the final file comparison using an additional, slower-but-known-good method.  This is in addition to the normal, fast-but-more-complicated method.  Generally this has little performance impact, if you have sufficient free memory to cache recently compared files.\n",
            invocationString);
 }
 
