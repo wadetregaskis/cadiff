@@ -450,8 +450,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                   b.path.UTF8String);
 
         NSMutableDictionary *duplicates = [NSMutableDictionary dictionary];
-        NSMutableSet *onlyInA = [NSMutableSet set];
-        NSMutableSet *onlyInB = [NSMutableSet set];
+        NSMutableOrderedSet *onlyInA = [NSMutableOrderedSet orderedSet];
+        NSMutableOrderedSet *onlyInB = [NSMutableOrderedSet orderedSet];
 
         if (fBenchmark) {
             assert(0 == system("/usr/bin/purge"));
@@ -511,11 +511,17 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
         printf("\n\n");
 
+        NSComparisonResult (^URLComparator)(NSURL*, NSURL*) = ^NSComparisonResult(NSURL *a, NSURL *b) {
+            return [a.path compare:b.path options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
+        };
+
         if (0 < duplicates.count) {
             printf("Duplicates:\n");
 
-            [duplicates enumerateKeysAndObjectsUsingBlock:^(NSURL *aVersion, NSURL *bVersion, BOOL *stop) {
-                printf("\t%s <-> %s\n", aVersion.path.UTF8String, bVersion.path.UTF8String);
+            NSArray *sortedURLs = [duplicates.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:URLComparator];
+
+            [sortedURLs enumerateObjectsUsingBlock:^(NSURL *url, NSUInteger index, BOOL *stop) {
+                printf("\t%s <-> %s\n", url.path.UTF8String, ((NSURL*)duplicates[url]).path.UTF8String);
             }];
 
             printf("\n");
@@ -523,10 +529,11 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             printf("No duplicates.\n");
         }
 
-        if (onlyInA.anyObject) {
+        if (0 < onlyInA.count) {
             printf("Only in \"%s\":\n", a.path.UTF8String);
 
-            [onlyInA enumerateObjectsUsingBlock:^(NSURL *file, BOOL *stop) {
+            [onlyInA sortWithOptions:NSSortConcurrent usingComparator:URLComparator];
+            [onlyInA enumerateObjectsUsingBlock:^(NSURL *file, NSUInteger index, BOOL *stop) {
                 printf("\t%s\n", file.path.UTF8String);
             }];
 
@@ -535,10 +542,11 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             printf("Nothing unique to \"%s\".\n", a.path.UTF8String);
         }
 
-        if (onlyInB.anyObject) {
+        if (0 < onlyInB.count) {
             printf("Only in \"%s\":\n", b.path.UTF8String);
 
-            [onlyInB enumerateObjectsUsingBlock:^(NSURL *file, BOOL *stop) {
+            [onlyInB sortWithOptions:NSSortConcurrent usingComparator:URLComparator];
+            [onlyInB enumerateObjectsUsingBlock:^(NSURL *file, NSUInteger index, BOOL *stop) {
                 printf("\t%s\n", file.path.UTF8String);
             }];
 
