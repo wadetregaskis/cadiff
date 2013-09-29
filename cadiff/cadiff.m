@@ -95,7 +95,7 @@ static void computeHashes(NSURL *files,
 
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
         dispatch_group_t dispatchGroup = dispatch_group_create();
-        dispatch_queue_t jobQueue = dispatch_queue_create("Hash Job Queue", DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:files.path].UTF8String, DISPATCH_QUEUE_SERIAL);
 
         for (NSURL *file in fileEnumerator) {
             if (!allGood) {
