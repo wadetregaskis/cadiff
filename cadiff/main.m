@@ -67,10 +67,11 @@ static dispatch_io_t openFile(NSURL *file) {
 }
 
 static void computeHashes(NSURL *files,
+                          size_t hashInputSizeLimit,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
                           dispatch_queue_t syncQueue,
-                          void (^completionBlock)(BOOL)) NOT_NULL(1, 2, 3) {
+                          void (^completionBlock)(BOOL)) NOT_NULL(1, 3, 4) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL allGood = YES;
 
@@ -147,7 +148,7 @@ static void computeHashes(NSURL *files,
 
                 dispatch_io_read(fileIO,
                                  0,
-                                 SIZE_MAX,
+                                 ((0 < hashInputSizeLimit) ? hashInputSizeLimit : SIZE_MAX),
                                  dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
                                  ^(bool done, dispatch_data_t data, int error) {
                                      if (!done && !allGood) {
@@ -359,12 +360,15 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
 int main(int argc, char* const argv[]) NOT_NULL(2) {
     static const struct option longOptions[] = {
-        {"benchmark",   no_argument,    &fBenchmark,    YES},
-        {"debug",       no_argument,    &fDebug,        YES},
-        {"help",        no_argument,    NULL,           'h'},
-        {"verify",      no_argument,    &fVerify,       YES},
-        {NULL,          0,              NULL,           0}
+        {"benchmark",           no_argument,        &fBenchmark,    YES},
+        {"debug",               no_argument,        &fDebug,        YES},
+        {"hashInputSizeLimit",  required_argument,  NULL,           1},
+        {"help",                no_argument,        NULL,           'h'},
+        {"verify",              no_argument,        &fVerify,       YES},
+        {NULL,                  0,                  NULL,           0}
     };
+
+    size_t hashInputSizeLimit = 1ULL << 20;
 
     int optionIndex = 0;
     while (-1 != (optionIndex = getopt_long(argc, argv, "h", longOptions, NULL))) {
@@ -372,6 +376,17 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             case 0:
                 // One of our boolean flags, that sets the global variable directly.  All good.
                 break;
+            case 1: {
+                char *end = NULL;
+                hashInputSizeLimit = strtoull(optarg, &end, 0);
+
+                if (!end || *end) {
+                    fprintf(stderr, "Invalid hash input size limit \"%s\" - must be a positive number (or zero).\n", optarg);
+                    return EINVAL;
+                }
+
+                break;
+            }
             case 'h':
                 usage(argv[0]);
                 return 0;
@@ -418,7 +433,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
         __block BOOL successful = YES;
 
-        computeHashes(a, aURLsToHashes, aHashesToURLs, syncQueue, ^(BOOL allGood) {
+        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -426,7 +441,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             dispatch_semaphore_signal(aHashingDone);
         });
 
-        computeHashes(b, bURLsToHashes, bHashesToURLs, syncQueue, ^(BOOL allGood) {
+        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
