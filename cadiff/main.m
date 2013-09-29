@@ -462,6 +462,15 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
 
+        if (fBenchmark) {
+            assert(0 == system("/usr/bin/purge"));
+        }
+
+        printf("Comparing suspects"); fflush(stdout);
+
+        dispatch_group_t dispatchGroup = dispatch_group_create();
+        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
+
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
             NSURL *duplicateFile = bHashesToURLs[hash];
 
