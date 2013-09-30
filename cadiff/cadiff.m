@@ -33,6 +33,7 @@ static int fVerify = NO;
 
 
 #define LOG_DEBUG(format, ...) ({ if (fDebug) { printf(format, ## __VA_ARGS__); } })
+#define LOG_ERROR(format, ...) ({ fprintf(stderr, format, ## __VA_ARGS__); fflush(stderr); })
 
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
@@ -58,12 +59,12 @@ static dispatch_io_t openFile(NSURL *file) {
                                                         dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
                                                         ^(int error) {
                                                             if (0 != error) {
-                                                                fprintf(stderr, "Error %d (%s) reading \"%s\".\n", error, strerror(error), file.path.UTF8String);
+                                                                LOG_ERROR("Error %d (%s) reading \"%s\".\n", error, strerror(error), file.path.UTF8String);
                                                             }
                                                         });
 
     if (!fileIO) {
-        fprintf(stderr, "Unable to create I/O stream for \"%s\".\n", file.path.UTF8String);
+        LOG_ERROR("Unable to create I/O stream for \"%s\".\n", file.path.UTF8String);
         return NULL;
     }
 
@@ -91,7 +92,7 @@ static void computeHashes(NSURL *files,
                 fileEnumerator = @[files];
             }
         } else {
-            fprintf(stderr, "Unable to determine if \"%s\" is a folder or a file.  Assuming it's a folder.  Specific error was: %s\n", files.path.UTF8String, err.localizedDescription.UTF8String);
+            LOG_ERROR("Unable to determine if \"%s\" is a folder or a file.  Assuming it's a folder.  Specific error was: %s\n", files.path.UTF8String, err.localizedDescription.UTF8String);
         }
 
         if (!fileEnumerator) {
@@ -99,13 +100,13 @@ static void computeHashes(NSURL *files,
                                                 includingPropertiesForKeys:nil
                                                                    options:NSDirectoryEnumerationSkipsHiddenFiles
                                                               errorHandler:^(NSURL *url, NSError *error) {
-                fprintf(stderr, "Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
+                LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
                 allGood = NO;
                 return NO;
             }];
 
             if (!fileEnumerator) {
-                fprintf(stderr, "Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
+                LOG_ERROR("Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
                 dispatch_async(syncQueue, ^{
                     completionBlock(NO);
                 });
@@ -129,7 +130,7 @@ static void computeHashes(NSURL *files,
                         continue;
                     }
                 } else {
-                    fprintf(stderr, "Unable to determine if \"%s\" is a folder or not (assuming it's not), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
+                    LOG_ERROR("Unable to determine if \"%s\" is a folder or not (assuming it's not), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
                 }
             }
 
@@ -143,13 +144,13 @@ static void computeHashes(NSURL *files,
             CC_SHA1_CTX *hashContext = malloc(sizeof(*hashContext));
 
             if (!hashContext) {
-                fprintf(stderr, "Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
+                LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
                 allGood = NO;
                 break;
             }
 
             if (1 != CC_SHA1_Init(hashContext)) {
-                fprintf(stderr, "Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
+                LOG_ERROR("Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
                 allGood = NO;
                 free(hashContext);
                 break;
@@ -183,7 +184,7 @@ static void computeHashes(NSURL *files,
                                                                  if (1 == CC_SHA1_Update(hashContext, buffer, (CC_LONG)size)) {
                                                                      return true;
                                                                  } else {
-                                                                     fprintf(stderr, "Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
+                                                                     LOG_ERROR("Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
                                                                      allGood = NO;
                                                                      dispatch_io_close(fileIO, DISPATCH_IO_STOP);
                                                                      return false;
@@ -204,7 +205,7 @@ static void computeHashes(NSURL *files,
 
                                                  dispatch_async(syncQueue, ^{
                                                      if (hashesToURLs[hashAsData]) {
-                                                         fprintf(stderr, "Hash collision between \"%s\" and \"%s\".\n", ((NSURL*)hashesToURLs[hashAsData]).path.UTF8String, file.path.UTF8String);
+                                                         LOG_ERROR("Hash collision between \"%s\" and \"%s\".\n", ((NSURL*)hashesToURLs[hashAsData]).path.UTF8String, file.path.UTF8String);
                                                          allGood = NO;
                                                      } else {
                                                          URLsToHashes[file] = hashAsData;
@@ -214,7 +215,7 @@ static void computeHashes(NSURL *files,
                                                      dispatch_group_leave(dispatchGroup);
                                                  });
                                              } else {
-                                                 fprintf(stderr, "Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
+                                                 LOG_ERROR("Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
                                                  dispatch_group_leave(dispatchGroup);
                                              }
                                          }
@@ -247,7 +248,7 @@ static off_t sizeOfFile(NSURL *file) NOT_NULL(1) {
     if (0 == lstat(file.path.UTF8String, &stats)) {
         return stats.st_size;
     } else {
-        fprintf(stderr, "Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+        LOG_ERROR("Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
         return OFF_MIN;
     }
 }
@@ -346,7 +347,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                                      });
                                  } else {
                                      if (ECANCELED != error) {
-                                         fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), a.path.UTF8String);
+                                         LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), a.path.UTF8String);
                                      }
                                      dispatch_semaphore_signal(doneNotification);
                                  }
@@ -363,7 +364,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                                      });
                                  } else {
                                      if (ECANCELED != error) {
-                                         fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), b.path.UTF8String);
+                                         LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), b.path.UTF8String);
                                      }
                                      dispatch_semaphore_signal(doneNotification);
                                  }
@@ -405,7 +406,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                 hashInputSizeLimit = strtoull(optarg, &end, 0);
 
                 if (!end || *end) {
-                    fprintf(stderr, "Invalid hash input size limit \"%s\" - must be a positive number (or zero).\n", optarg);
+                    LOG_ERROR("Invalid hash input size limit \"%s\" - must be a positive number (or zero).\n", optarg);
                     return EINVAL;
                 }
 
@@ -415,7 +416,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                 usage(argv[0]);
                 return 0;
             default:
-                fprintf(stderr, "Invalid arguments (%d).\n", optionIndex);
+                LOG_ERROR("Invalid arguments (%d).\n", optionIndex);
                 return EINVAL;
         }
     }
