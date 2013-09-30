@@ -51,7 +51,7 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            invocationString);
 }
 
-static dispatch_io_t openFile(NSURL *file) {
+static dispatch_io_t openFile(NSURL *file, dispatch_semaphore_t concurrencyLimiter) {
     dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
                                                         file.path.UTF8String,
                                                         O_RDONLY | O_NOFOLLOW | O_NONBLOCK,
@@ -60,6 +60,10 @@ static dispatch_io_t openFile(NSURL *file) {
                                                         ^(int error) {
                                                             if (0 != error) {
                                                                 LOG_ERROR("Error %d (%s) reading \"%s\".\n", error, strerror(error), file.path.UTF8String);
+                                                            }
+
+                                                            if (concurrencyLimiter) {
+                                                                dispatch_semaphore_signal(concurrencyLimiter);
                                                             }
                                                         });
 
@@ -134,7 +138,7 @@ static void computeHashes(NSURL *files,
                 }
             }
 
-            dispatch_io_t fileIO = openFile(file);
+            dispatch_io_t fileIO = openFile(file, concurrencyLimiter);
 
             if (!fileIO) {
                 allGood = NO;
@@ -219,14 +223,19 @@ static void computeHashes(NSURL *files,
                                                  dispatch_group_leave(dispatchGroup);
                                              }
                                          }
-                                     } else if (ECANCELED != error) {
-                                         fprintf(stderr, "Error %d (%s) while reading from \"%s\".\n", error, strerror(error), file.path.UTF8String);
+                                     } else {
+                                         if (ECANCELED != error) {
+                                             LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), file.path.UTF8String);
+                                             dispatch_io_close(fileIO, DISPATCH_IO_STOP);  // I feel like this should be redundant, but everyone else seems to be dispatch_io_closing on error, religiously.  So I've joined the cult.
+                                         }
+
                                          allGood = NO;
                                      }
 
                                      if (done) {
                                          free(hashContext);
-                                         dispatch_semaphore_signal(concurrencyLimiter);
+
+                                         // There's a delay between here and when the actual file descriptor is released.  It's an undefined delay - it depends on various queues' activity etc.  It's a pain because if we were to signal concurrencyLimiter here, it'd try to use another file descriptor potentially sooner than we release this one.  Repeat enough times and you run out of file descriptors.  So the obvious thing to do is call dispatch_io_close() right here.  That does in fact address that particular problem.  But it also, in the case where (0 == error && done), triggers a use-after-free bug in libdispatch (io.c:1261 in the source currently on libdispatch.macosforge.org).  It appears to be a genuine bug in libdispatch, with no direct workaround I can find.  So the indirect workaround is to wait until the actual "close" block is run, in order to signal concurrencyLimiter.  And that was setup by openFile() at dispatch_io_t-creation time.
 
                                          if (0 != error) {
                                              dispatch_group_leave(dispatchGroup);
@@ -266,10 +275,10 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
     __block BOOL same = NO;
 
-    dispatch_io_t aIO = openFile(a);
+    dispatch_io_t aIO = openFile(a, NULL);
 
     if (aIO) {
-        dispatch_io_t bIO = openFile(b);
+        dispatch_io_t bIO = openFile(b, NULL);
 
         if (bIO) {
             dispatch_queue_t compareQueue = dispatch_queue_create("Compare Queue", DISPATCH_QUEUE_SERIAL);
