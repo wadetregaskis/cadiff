@@ -87,9 +87,9 @@ static void computeHashes(NSURL *files,
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL allGood = YES;
 
-        NSNumber *isFolder = nil;
-        NSError *err = nil;
-        id fileEnumerator = nil;
+        NSNumber *isFolder;
+        NSError *err;
+        id fileEnumerator;
 
         if ([files getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
             if (![isFolder boolValue]) {
@@ -618,7 +618,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             NSMutableDictionary *duplicatePairs = [NSMutableDictionary dictionary];
 
             while (0 < aDuplicates.count) {
-                __block NSURL *lastProcessed = nil;
+                __block NSURL *lastProcessed;
 
                 [aDuplicates enumerateKeysAndObjectsUsingBlock:^(NSURL *a, NSSet *bSide, BOOL *stop) {
                     lastProcessed = a;
