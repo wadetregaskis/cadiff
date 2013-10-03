@@ -402,6 +402,45 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
     return same;
 }
 
+static void addValueToKey(NSMutableDictionary *dictionary, id key, id value) NOT_NULL(1, 2, 3) {
+    NSMutableSet *existingEntry = dictionary[key];
+
+    if (existingEntry) {
+        [existingEntry addObject:value];
+    } else {
+        dictionary[key] = [NSMutableSet setWithObject:value];
+    }
+}
+
+static NSComparisonResult compareURLs(NSURL *a, NSURL *b, void *unused) NOT_NULL(1, 2) {
+    return [a.path compare:b.path options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
+}
+
+static NSString* prettyFormatURLSet(NSSet *set) NOT_NULL(1) {
+    if (0 == set.count) {
+        return @"(empty)";
+    } else if (1 == set.count) {
+        return ((NSURL*)set.anyObject).path;
+    } else {
+        NSArray *sortedURLs = [[set allObjects] sortedArrayUsingFunction:compareURLs context:NULL];
+        NSMutableString *result = [@"(" mutableCopy];
+        BOOL haveFirst = NO;
+
+        for (NSURL *URL in sortedURLs) {
+            if (haveFirst) {
+                [result appendFormat:@", \"%@\"", URL.path];
+            } else {
+                [result appendFormat:@"\"%@\"", URL.path];
+                haveFirst = YES;
+            }
+        }
+
+        [result appendString:@")"];
+
+        return result;
+    }
+}
+
 int main(int argc, char* const argv[]) NOT_NULL(2) {
     static const struct option longOptions[] = {
         {"benchmark",           no_argument,        &fBenchmark,    YES},
@@ -538,8 +577,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                 printf("▲"); fflush(stdout);
 
                                 dispatch_async(syncQueue, ^{
-                                    aDuplicates[file] = potentialDuplicate;
-                                    bDuplicates[potentialDuplicate] = file;
+                                    addValueToKey(aDuplicates, file, potentialDuplicate);
+                                    addValueToKey(bDuplicates, potentialDuplicate, file);
                                     dispatch_group_leave(dispatchGroup);
                                 });
                             } else {
@@ -575,23 +614,52 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
         printf("\n\n");
 
-        NSComparisonResult (^URLComparator)(NSURL*, NSURL*) = ^NSComparisonResult(NSURL *a, NSURL *b) {
-            return [a.path compare:b.path options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
-        };
-
         if (0 < aDuplicates.count) {
+            NSMutableDictionary *duplicatePairs = [NSMutableDictionary dictionary];
+
+            while (0 < aDuplicates.count) {
+                __block NSURL *lastProcessed = nil;
+
+                [aDuplicates enumerateKeysAndObjectsUsingBlock:^(NSURL *a, NSSet *bSide, BOOL *stop) {
+                    lastProcessed = a;
+
+                    NSMutableSet *aSide = [NSMutableSet set];
+
+                    for (NSURL *b in bSide) {
+                        [aSide unionSet:bDuplicates[b]];
+                        [bDuplicates removeObjectForKey:b];
+                    }
+
+                    if (0 < aSide.count) {
+                        duplicatePairs[aSide] = bSide;
+                    }
+
+                    *stop = YES;
+                }];
+
+                [aDuplicates removeObjectForKey:lastProcessed];
+            }
+
             printf("Duplicates:\n");
 
-            NSArray *sortedURLs = [aDuplicates.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:URLComparator];
+            NSArray *sortedURLs = [duplicatePairs.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:^NSComparisonResult(NSSet *aSide, NSSet *bSide) {
+                return [prettyFormatURLSet(aSide) compare:prettyFormatURLSet(bSide)
+                                                  options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
+            }];
 
-            [sortedURLs enumerateObjectsUsingBlock:^(NSURL *url, NSUInteger index, BOOL *stop) {
-                printf("\t%s <-> %s\n", url.path.UTF8String, ((NSURL*)aDuplicates[url]).path.UTF8String);
+            [sortedURLs enumerateObjectsUsingBlock:^(NSSet *aSide, NSUInteger index, BOOL *stop) {
+                printf("\t%s <-> %s\n", prettyFormatURLSet(aSide).UTF8String, prettyFormatURLSet((NSSet*)duplicatePairs[aSide]).UTF8String);
             }];
 
             printf("\n");
         } else {
             printf("No duplicates.\n");
         }
+
+        NSComparisonResult (^URLComparator)(NSURL*, NSURL*) = ^NSComparisonResult(NSURL *a, NSURL *b) {
+            return [a.path compare:b.path
+                           options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
+        };
 
         if (0 < onlyInA.count) {
             printf("Only in \"%s\":\n", a.path.UTF8String);
