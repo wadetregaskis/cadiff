@@ -208,12 +208,22 @@ static void computeHashes(NSURL *files,
                                                  }
 
                                                  dispatch_async(syncQueue, ^{
-                                                     if (hashesToURLs[hashAsData]) {
-                                                         LOG_ERROR("Hash collision between \"%s\" and \"%s\".\n", ((NSURL*)hashesToURLs[hashAsData]).path.UTF8String, file.path.UTF8String);
-                                                         allGood = NO;
+                                                     URLsToHashes[file] = hashAsData;
+
+                                                     NSMutableSet *existingEntry = hashesToURLs[hashAsData];
+
+                                                     if (existingEntry) {
+                                                         NSMutableString *errorMessage = [NSMutableString stringWithFormat:@"Hash collision between \"%@\" and: ", file.path];
+
+                                                         for (NSURL *otherFile in existingEntry) {
+                                                             [errorMessage appendFormat:@"\"%@\" ", otherFile.path];
+                                                         }
+
+                                                         LOG_ERROR("%s\n", errorMessage.UTF8String);
+
+                                                         [existingEntry addObject:file];
                                                      } else {
-                                                         URLsToHashes[file] = hashAsData;
-                                                         hashesToURLs[hashAsData] = file;
+                                                         hashesToURLs[hashAsData] = [NSMutableSet setWithObject:file];
                                                      }
 
                                                      dispatch_group_leave(dispatchGroup);
@@ -493,12 +503,13 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         printf("\n");
 
         LOG_DEBUG("Calculated %lu hashes for \"%s\", and %lu for \"%s\".\n",
-                  (unsigned long)aHashesToURLs.count,
+                  (unsigned long)aURLsToHashes.count,
                   a.path.UTF8String,
-                  (unsigned long)bHashesToURLs.count,
+                  (unsigned long)bURLsToHashes.count,
                   b.path.UTF8String);
 
-        NSMutableDictionary *duplicates = [NSMutableDictionary dictionary];
+        NSMutableDictionary *aDuplicates = [NSMutableDictionary dictionary];
+        NSMutableDictionary *bDuplicates = [NSMutableDictionary dictionary];
         NSMutableOrderedSet *onlyInA = [NSMutableOrderedSet orderedSet];
         NSMutableOrderedSet *onlyInB = [NSMutableOrderedSet orderedSet];
 
@@ -512,51 +523,55 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
-            NSURL *duplicateFile = bHashesToURLs[hash];
+            NSSet *potentialDuplicates = bHashesToURLs[hash];
 
-            if (duplicateFile) {
-                LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+            if (potentialDuplicates) {
+                for (NSURL *potentialDuplicate in potentialDuplicates) {
+                    LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
 
-                dispatch_group_enter(dispatchGroup);
+                    dispatch_group_enter(dispatchGroup);
+                    dispatch_async(syncQueue, ^{
+                        dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
 
-                dispatch_async(syncQueue, ^{
-                    dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                            if (compareFiles(file, potentialDuplicate)) {
+                                printf("▲"); fflush(stdout);
 
-                    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                        if (compareFiles(file, duplicateFile)) {
-                            printf("▲"); fflush(stdout);
-
-                            dispatch_async(syncQueue, ^{
-                                duplicates[file] = duplicateFile;
-                                dispatch_group_leave(dispatchGroup);
-                            });
-                        } else {
-                            if (fDebug) {
-                                LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, duplicateFile.path.UTF8String);
+                                dispatch_async(syncQueue, ^{
+                                    aDuplicates[file] = potentialDuplicate;
+                                    bDuplicates[potentialDuplicate] = file;
+                                    dispatch_group_leave(dispatchGroup);
+                                });
                             } else {
-                                printf("△"); fflush(stdout);
+                                if (fDebug) {
+                                    LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
+                                } else {
+                                    printf("△"); fflush(stdout);
+                                }
+
+                                dispatch_group_leave(dispatchGroup);
                             }
 
-                            dispatch_group_leave(dispatchGroup);
-                        }
-
-                        dispatch_semaphore_signal(concurrencyLimiter);
+                            dispatch_semaphore_signal(concurrencyLimiter);
+                        });
                     });
-                });
-            } else {
-                [onlyInA addObject:file];
+                }
             }
         }];
 
         dispatch_group_wait(dispatchGroup, DISPATCH_TIME_FOREVER);
 
-        [bURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
-            NSURL *duplicateFile = aHashesToURLs[hash];
+        for (NSURL *file in aURLsToHashes) {
+            if (!aDuplicates[file]) {
+                [onlyInA addObject:file];
+            }
+        }
 
-            if (!duplicateFile) {
+        for (NSURL *file in bURLsToHashes) {
+            if (!bDuplicates[file]) {
                 [onlyInB addObject:file];
             }
-        }];
+        }
 
         printf("\n\n");
 
@@ -564,13 +579,13 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             return [a.path compare:b.path options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
         };
 
-        if (0 < duplicates.count) {
+        if (0 < aDuplicates.count) {
             printf("Duplicates:\n");
 
-            NSArray *sortedURLs = [duplicates.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:URLComparator];
+            NSArray *sortedURLs = [aDuplicates.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:URLComparator];
 
             [sortedURLs enumerateObjectsUsingBlock:^(NSURL *url, NSUInteger index, BOOL *stop) {
-                printf("\t%s <-> %s\n", url.path.UTF8String, ((NSURL*)duplicates[url]).path.UTF8String);
+                printf("\t%s <-> %s\n", url.path.UTF8String, ((NSURL*)aDuplicates[url]).path.UTF8String);
             }];
 
             printf("\n");
