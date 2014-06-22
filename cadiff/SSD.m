@@ -34,7 +34,7 @@
 #include <IOKit/Kext/KextManager.h>
 
 
-BOOL isSolidState(dev_t dev) {
+BOOL isSolidState(dev_t dev, BOOL *isSSD) {
     io_iterator_t entryIterator;
 
     {
@@ -89,18 +89,16 @@ BOOL isSolidState(dev_t dev) {
                 isSolidState = [@"Solid State" isEqualToString:type];
                 NSLog(@"Found %sSSD disk %@", (isSolidState ? "" : "non-"), res);
                 CFRelease(res);
-                if (isSolidState) {
-                    break;
-                }
             }
-        } while(maxlevels--);
+        } while(!isSolidState && maxlevels--);
 
         if (serviceEntry) {
             IOObjectRelease(serviceEntry);
         }
     }
-    
+
     IOObjectRelease(entryIterator);
 
-    return isSolidState;
+    *isSSD = isSolidState;
+    return YES;
 }

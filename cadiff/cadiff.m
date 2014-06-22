@@ -151,7 +151,11 @@ static void computeHashes(NSURL *files,
                     if (volumeIsSSDCache[devAsNumber]) {
                         isOnSSD = ((NSNumber*)volumeIsSSDCache[devAsNumber]).boolValue;
                     } else {
-                        volumeIsSSDCache[devAsNumber] = @(isOnSSD = isSolidState(fileStat.st_dev));
+                        if (isSolidState(fileStat.st_dev, &isOnSSD)) {
+                            volumeIsSSDCache[devAsNumber] = @(isOnSSD);
+                        } else {
+                            LOG_ERROR("Unable to determine whether or not the file \"%s\" is backed by an SSD.  Conservatively assuming it's not.\n", file.path.UTF8String);
+                        }
                     }
 
                     LOG_DEBUG("File \"%s\" on volume (%u, %u) is %sliving on an SSD.\n",

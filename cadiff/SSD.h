@@ -16,4 +16,4 @@
 
 #include <sys/stat.h>
 
-BOOL isSolidState(dev_t dev);
+BOOL isSolidState(dev_t dev, BOOL *isSSD);
