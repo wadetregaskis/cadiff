@@ -144,16 +144,21 @@ static void computeHashes(NSURL *files,
 
             BOOL isOnSSD = NO;
             {
-                NSString *uuid;
+                struct stat fileStat;
+                if (0 == stat(file.path.UTF8String, &fileStat)) {
+                    NSNumber *devAsNumber = @(fileStat.st_dev);
 
-                if ([file getResourceValue:&uuid forKey:NSURLVolumeUUIDStringKey error:&err]) {
-                    if (volumeIsSSDCache[uuid]) {
-                        isOnSSD = ((NSNumber*)volumeIsSSDCache[uuid]).boolValue;
+                    if (volumeIsSSDCache[devAsNumber]) {
+                        isOnSSD = ((NSNumber*)volumeIsSSDCache[devAsNumber]).boolValue;
                     } else {
-                        volumeIsSSDCache[uuid] = @(isOnSSD = isSolidState(uuid));
+                        volumeIsSSDCache[devAsNumber] = @(isOnSSD = isSolidState(fileStat.st_dev));
                     }
 
-                    LOG_DEBUG("File \"%s\" on volume %s is %sliving on an SSD.\n", file.path.UTF8String, uuid.UTF8String, (isOnSSD ? "" : "not "));
+                    LOG_DEBUG("File \"%s\" on volume (%u, %u) is %sliving on an SSD.\n",
+                              file.path.UTF8String,
+                              major(fileStat.st_dev),
+                              minor(fileStat.st_dev),
+                              (isOnSSD ? "" : "not "));
                 } else {
                     LOG_ERROR("Unable to determine the volume UUID of \"%s\" (in order to optimise I/Os to it), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
                 }

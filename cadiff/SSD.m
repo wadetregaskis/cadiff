@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <paths.h>
 #include <sys/param.h>
+#include <sys/stat.h>
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -33,7 +34,7 @@
 #include <IOKit/Kext/KextManager.h>
 
 
-BOOL isSolidState(NSString *volumeUUID)
+BOOL isSolidState(dev_t dev)
 {
     io_iterator_t entryIterator;
 
@@ -41,7 +42,8 @@ BOOL isSolidState(NSString *volumeUUID)
         CFMutableDictionaryRef classesToMatch = IOServiceMatching("IOMedia");
 
         if (classesToMatch) {
-            CFDictionaryAddValue(classesToMatch, CFSTR(kIOMediaUUIDKey), (__bridge const void *)(volumeUUID));
+            CFDictionaryAddValue(classesToMatch, CFSTR("BSD Major"), (__bridge const void *)@(major(dev)));
+            CFDictionaryAddValue(classesToMatch, CFSTR("BSD Minor"), (__bridge const void *)@(minor(dev)));
             NSLog(@"Will try to match I/O registry entires with: %@", classesToMatch);
         } else {
             NSLog(@"Failed to create I/O registery matcher for IOMedias (logical volumes).");
@@ -86,9 +88,10 @@ BOOL isSolidState(NSString *volumeUUID)
             CFTypeRef res = IORegistryEntryCreateCFProperty(serviceEntry, CFSTR(kIOPropertyDeviceCharacteristicsKey), kCFAllocatorDefault, 0);
             if (res)
             {
-                NSString *type = [(NSDictionary*)CFBridgingRelease(res) objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
-                isSolidState = [@"Solid State" isEqualToString:type]; type = nil;
+                NSString *type = [(__bridge NSDictionary*)res objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
+                isSolidState = [@"Solid State" isEqualToString:type];
                 NSLog(@"Found %sSSD disk %@", (isSolidState ? "" : "non-"), res);
+                CFRelease(res);
                 if (isSolidState) break;
             }
         }
