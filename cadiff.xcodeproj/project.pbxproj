@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		75765584195772A40035427F /* SSD.m in Sources */ = {isa = PBXBuildFile; fileRef = 75765583195772A40035427F /* SSD.m */; };
 		75B27C0817F29DC400D86FDF /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75B27C0717F29DC400D86FDF /* Foundation.framework */; };
 		75B27C0B17F29DC400D86FDF /* cadiff.m in Sources */ = {isa = PBXBuildFile; fileRef = 75B27C0A17F29DC400D86FDF /* cadiff.m */; };
 		75B27C0F17F29DC400D86FDF /* cadiff.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 75B27C0E17F29DC400D86FDF /* cadiff.1 */; };
@@ -27,6 +28,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		75765583195772A40035427F /* SSD.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SSD.m; sourceTree = "<group>"; };
+		75765585195772FD0035427F /* SSD.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SSD.h; sourceTree = "<group>"; };
 		75B27C0417F29DC400D86FDF /* cadiff */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = cadiff; sourceTree = BUILT_PRODUCTS_DIR; };
 		75B27C0717F29DC400D86FDF /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		75B27C0A17F29DC400D86FDF /* cadiff.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = cadiff.m; sourceTree = "<group>"; };
@@ -79,6 +82,8 @@
 			isa = PBXGroup;
 			children = (
 				75B27C0A17F29DC400D86FDF /* cadiff.m */,
+				75765583195772A40035427F /* SSD.m */,
+				75765585195772FD0035427F /* SSD.h */,
 				75B27C0E17F29DC400D86FDF /* cadiff.1 */,
 				75B27C0C17F29DC400D86FDF /* Supporting Files */,
 			);
@@ -145,6 +150,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				75765584195772A40035427F /* SSD.m in Sources */,
 				75B27C0B17F29DC400D86FDF /* cadiff.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
