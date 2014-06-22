@@ -43,7 +43,7 @@ BOOL isSolidState(UInt8 const *cpath)
             if (noErr == FSCopyDiskIDForVolume(volCatInfo.volume, &idStr))
             {
                 NSString *str = (NSString*)CFBridgingRelease(idStr);
-                //NSLog(@"Checking bsd disk %@",str);
+                NSLog(@"Checking bsd disk %@",str);
 
                 // create matching dictionary
                 classesToMatch = IOBSDNameMatching(kIOMasterPortDefault,0,[str UTF8String]);
@@ -90,8 +90,8 @@ BOOL isSolidState(UInt8 const *cpath)
             if (res)
             {
                 NSString *type = [(NSDictionary*)CFBridgingRelease(res) objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
-                //NSLog(@"Found disk %@",res);
                 isSolidState = [@"Solid State" isEqualToString:type]; type = nil;
+                NSLog(@"Found %sSSD disk %@", (isSolidState ? "" : "non-"), res);
                 if (isSolidState) break;
             }
         }
