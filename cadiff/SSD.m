@@ -34,8 +34,7 @@
 #include <IOKit/Kext/KextManager.h>
 
 
-BOOL isSolidState(dev_t dev)
-{
+BOOL isSolidState(dev_t dev) {
     io_iterator_t entryIterator;
 
     {
@@ -51,8 +50,7 @@ BOOL isSolidState(dev_t dev)
         }
 
         // IOServiceGetMatchingServices() CFReleases classesToMatch (even if it returns an error).
-        if (KERN_SUCCESS != IOServiceGetMatchingServices(kIOMasterPortDefault, classesToMatch, &entryIterator))
-        {
+        if (KERN_SUCCESS != IOServiceGetMatchingServices(kIOMasterPortDefault, classesToMatch, &entryIterator)) {
             NSLog(@"Can't iterate services");
             return NO;
         }
@@ -62,18 +60,18 @@ BOOL isSolidState(dev_t dev)
 
     // iterate over all found medias
     io_object_t serviceEntry, parentMedia;
-    while ((serviceEntry = IOIteratorNext(entryIterator)))
-    {
-        io_name_t mediaName;
-        if (KERN_SUCCESS != IORegistryEntryGetName(serviceEntry, mediaName)) {
-            strlcpy(mediaName, "Unknown", sizeof(mediaName));
+    while ((serviceEntry = IOIteratorNext(entryIterator))) {
+        {
+            io_name_t mediaName;
+            if (KERN_SUCCESS != IORegistryEntryGetName(serviceEntry, mediaName)) {
+                strlcpy(mediaName, "Unknown", sizeof(mediaName));
+            }
+
+            NSLog(@"Found IOMedia \"%s\".", mediaName);
         }
 
-        NSLog(@"Found IOMedia \"%s\".", mediaName);
-
         int maxlevels = 8;
-        do
-        {
+        do {
             kern_return_t kernResult = IORegistryEntryGetParentEntry(serviceEntry, kIOServicePlane, &parentMedia);
 
             if (KERN_SUCCESS != kernResult) {
@@ -86,19 +84,22 @@ BOOL isSolidState(dev_t dev)
             if (!parentMedia) break; // finished iterator
 
             CFTypeRef res = IORegistryEntryCreateCFProperty(serviceEntry, CFSTR(kIOPropertyDeviceCharacteristicsKey), kCFAllocatorDefault, 0);
-            if (res)
-            {
+            if (res) {
                 NSString *type = [(__bridge NSDictionary*)res objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
                 isSolidState = [@"Solid State" isEqualToString:type];
                 NSLog(@"Found %sSSD disk %@", (isSolidState ? "" : "non-"), res);
                 CFRelease(res);
-                if (isSolidState) break;
+                if (isSolidState) {
+                    break;
+                }
             }
-        }
-        while(maxlevels--);
+        } while(maxlevels--);
 
-        if (serviceEntry) IOObjectRelease(serviceEntry);
+        if (serviceEntry) {
+            IOObjectRelease(serviceEntry);
+        }
     }
+    
     IOObjectRelease(entryIterator);
 
     return isSolidState;
