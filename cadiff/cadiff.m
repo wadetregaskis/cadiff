@@ -33,7 +33,7 @@ static int fVerify = NO;
 
 
 #define LOG_DEBUG(format, ...) ({ if (fDebug) { printf(format, ## __VA_ARGS__); } })
-#define LOG_ERROR(format, ...) ({ fprintf(stderr, format, ## __VA_ARGS__); fflush(stderr); })
+#define LOG_ERROR(format, ...) ({ fflush(stdout); fprintf(stderr, format, ## __VA_ARGS__); fflush(stderr); })
 
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
