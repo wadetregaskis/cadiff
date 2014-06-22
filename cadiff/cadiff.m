@@ -164,7 +164,7 @@ static void computeHashes(NSURL *files,
                               minor(fileStat.st_dev),
                               (isOnSSD ? "" : "not "));
                 } else {
-                    LOG_ERROR("Unable to determine the volume UUID of \"%s\" (in order to optimise I/Os to it), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
+                    LOG_ERROR("Unable to determine the volume UUID of \"%s\" (in order to optimise I/Os to it), error: (%d) %s\n", file.path.UTF8String, errno, strerror(errno));
                 }
             }
 
