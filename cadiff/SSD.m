@@ -1,6 +1,7 @@
 // Original version:  https://code.google.com/p/itunesfixer/source/browse/trunk/SSD.m?r=2
 
 // Copyright (c) 2010, porneL
+// Modified 2014, Wade Tregaskis.
 // All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -22,47 +23,37 @@
 #include <errno.h>
 #include <paths.h>
 #include <sys/param.h>
+
+#include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
 #include <IOKit/IOBSD.h>
+#include <IOKit/IOTypes.h>
 #include <IOKit/storage/IOBlockStorageDevice.h>
-#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/storage/IOMedia.h>
 #include <IOKit/Kext/KextManager.h>
 
 
-BOOL isSolidState(UInt8 const *cpath)
+BOOL isSolidState(NSString *volumeUUID)
 {
-    FSRef volRef;
-    CFMutableDictionaryRef classesToMatch = nil;
-
-    if (noErr == FSPathMakeRef( cpath, &volRef, NULL))
-    {
-        FSCatalogInfo volCatInfo;
-        if (noErr == FSGetCatalogInfo(&volRef, kFSCatInfoVolume, &volCatInfo, NULL, NULL, NULL))
-        {
-            CFStringRef idStr = NULL;
-            if (noErr == FSCopyDiskIDForVolume(volCatInfo.volume, &idStr))
-            {
-                NSString *str = (NSString*)CFBridgingRelease(idStr);
-                NSLog(@"Checking bsd disk %@",str);
-
-                // create matching dictionary
-                classesToMatch = IOBSDNameMatching(kIOMasterPortDefault,0,[str UTF8String]);
-            }
-        }
-    }
-
-    if (classesToMatch == NULL) {
-        NSLog(@"Could not find io classes of disk");
-        return NO;
-    }
-
-    // get iterator of matching services
     io_iterator_t entryIterator;
 
-    if (KERN_SUCCESS != IOServiceGetMatchingServices(kIOMasterPortDefault, classesToMatch, &entryIterator))
     {
-        NSLog(@"Can't iterate services");
-        return NO;
+        CFMutableDictionaryRef classesToMatch = IOServiceMatching("IOMedia");
+
+        if (classesToMatch) {
+            CFDictionaryAddValue(classesToMatch, CFSTR(kIOMediaUUIDKey), (__bridge const void *)(volumeUUID));
+            NSLog(@"Will try to match I/O registry entires with: %@", classesToMatch);
+        } else {
+            NSLog(@"Failed to create I/O registery matcher for IOMedias (logical volumes).");
+            return NO;
+        }
+
+        // IOServiceGetMatchingServices() CFReleases classesToMatch (even if it returns an error).
+        if (KERN_SUCCESS != IOServiceGetMatchingServices(kIOMasterPortDefault, classesToMatch, &entryIterator))
+        {
+            NSLog(@"Can't iterate services");
+            return NO;
+        }
     }
 
     BOOL isSolidState = NO;
@@ -71,18 +62,24 @@ BOOL isSolidState(UInt8 const *cpath)
     io_object_t serviceEntry, parentMedia;
     while ((serviceEntry = IOIteratorNext(entryIterator)))
     {
+        io_name_t mediaName;
+        if (KERN_SUCCESS != IORegistryEntryGetName(serviceEntry, mediaName)) {
+            strlcpy(mediaName, "Unknown", sizeof(mediaName));
+        }
+
+        NSLog(@"Found IOMedia \"%s\".", mediaName);
+
         int maxlevels = 8;
         do
         {
             kern_return_t kernResult = IORegistryEntryGetParentEntry(serviceEntry, kIOServicePlane, &parentMedia);
-            IOObjectRelease(serviceEntry);
 
             if (KERN_SUCCESS != kernResult) {
-                serviceEntry = 0;
                 NSLog(@"Error while getting parent service entry");
                 break;
             }
 
+            IOObjectRelease(serviceEntry);
             serviceEntry = parentMedia;
             if (!parentMedia) break; // finished iterator
 

@@ -8,10 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		75765584195772A40035427F /* SSD.m in Sources */ = {isa = PBXBuildFile; fileRef = 75765583195772A40035427F /* SSD.m */; };
+		75765587195789B20035427F /* System.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75765586195789B20035427F /* System.framework */; };
+		75765589195789E70035427F /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75765588195789E70035427F /* IOKit.framework */; };
 		75B27C0817F29DC400D86FDF /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75B27C0717F29DC400D86FDF /* Foundation.framework */; };
 		75B27C0B17F29DC400D86FDF /* cadiff.m in Sources */ = {isa = PBXBuildFile; fileRef = 75B27C0A17F29DC400D86FDF /* cadiff.m */; };
 		75B27C0F17F29DC400D86FDF /* cadiff.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 75B27C0E17F29DC400D86FDF /* cadiff.1 */; };
-		75B27C1A17F2BC8700D86FDF /* libcommonCrypto.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 75B27C1917F2BC8700D86FDF /* libcommonCrypto.dylib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -30,6 +31,8 @@
 /* Begin PBXFileReference section */
 		75765583195772A40035427F /* SSD.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SSD.m; sourceTree = "<group>"; };
 		75765585195772FD0035427F /* SSD.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SSD.h; sourceTree = "<group>"; };
+		75765586195789B20035427F /* System.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = System.framework; path = ../../../../System/Library/Frameworks/System.framework; sourceTree = "<group>"; };
+		75765588195789E70035427F /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		75B27C0417F29DC400D86FDF /* cadiff */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = cadiff; sourceTree = BUILT_PRODUCTS_DIR; };
 		75B27C0717F29DC400D86FDF /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		75B27C0A17F29DC400D86FDF /* cadiff.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = cadiff.m; sourceTree = "<group>"; };
@@ -44,7 +47,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				75B27C1A17F2BC8700D86FDF /* libcommonCrypto.dylib in Frameworks */,
+				75765589195789E70035427F /* IOKit.framework in Frameworks */,
+				75765587195789B20035427F /* System.framework in Frameworks */,
 				75B27C0817F29DC400D86FDF /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -72,6 +76,8 @@
 		75B27C0617F29DC400D86FDF /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				75765588195789E70035427F /* IOKit.framework */,
+				75765586195789B20035427F /* System.framework */,
 				75B27C1917F2BC8700D86FDF /* libcommonCrypto.dylib */,
 				75B27C0717F29DC400D86FDF /* Foundation.framework */,
 			);

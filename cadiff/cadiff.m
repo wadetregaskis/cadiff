@@ -25,6 +25,8 @@
 
 #import <Foundation/Foundation.h>
 
+#import "SSD.h"
+
 
 // Flags
 static int fBenchmark = NO;
@@ -101,7 +103,7 @@ static void computeHashes(NSURL *files,
 
         if (!fileEnumerator) {
             fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
-                                                includingPropertiesForKeys:nil
+                                                includingPropertiesForKeys:@[NSURLVolumeUUIDStringKey, NSURLIsDirectoryKey]
                                                                    options:NSDirectoryEnumerationSkipsHiddenFiles
                                                               errorHandler:^(NSURL *url, NSError *error) {
                 LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
@@ -122,6 +124,8 @@ static void computeHashes(NSURL *files,
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:files.path].UTF8String, DISPATCH_QUEUE_SERIAL);
 
+        NSMutableDictionary *volumeIsSSDCache = [NSMutableDictionary dictionary];
+
         for (NSURL *file in fileEnumerator) {
             if (!allGood) {
                 break;
@@ -135,6 +139,23 @@ static void computeHashes(NSURL *files,
                     }
                 } else {
                     LOG_ERROR("Unable to determine if \"%s\" is a folder or not (assuming it's not), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
+                }
+            }
+
+            BOOL isOnSSD = NO;
+            {
+                NSString *uuid;
+
+                if ([file getResourceValue:&uuid forKey:NSURLVolumeUUIDStringKey error:&err]) {
+                    if (volumeIsSSDCache[uuid]) {
+                        isOnSSD = ((NSNumber*)volumeIsSSDCache[uuid]).boolValue;
+                    } else {
+                        volumeIsSSDCache[uuid] = @(isOnSSD = isSolidState(uuid));
+                    }
+
+                    LOG_DEBUG("File \"%s\" on volume %s is %sliving on an SSD.\n", file.path.UTF8String, uuid.UTF8String, (isOnSSD ? "" : "not "));
+                } else {
+                    LOG_ERROR("Unable to determine the volume UUID of \"%s\" (in order to optimise I/Os to it), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
                 }
             }
 
