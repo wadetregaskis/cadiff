@@ -145,23 +145,25 @@ static void computeHashes(NSURL *files,
                 break;
             }
 
-            CC_SHA1_CTX *hashContext = malloc(sizeof(*hashContext));
-
-            if (!hashContext) {
-                LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
-                allGood = NO;
-                break;
-            }
-
-            if (1 != CC_SHA1_Init(hashContext)) {
-                LOG_ERROR("Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
-                allGood = NO;
-                free(hashContext);
-                break;
-            }
-
             dispatch_group_enter(dispatchGroup);
             dispatch_async(jobQueue, ^{
+                CC_SHA1_CTX *hashContext;
+
+                if (allGood) {
+                    hashContext = malloc(sizeof(*hashContext));
+
+                    if (hashContext) {
+                        if (1 != CC_SHA1_Init(hashContext)) {
+                            LOG_ERROR("Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
+                            allGood = NO;
+                            free(hashContext);
+                        }
+                    } else {
+                        LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
+                        allGood = NO;
+                    }
+                }
+
                 if (!allGood) {
                     dispatch_group_leave(dispatchGroup);
                     return;
