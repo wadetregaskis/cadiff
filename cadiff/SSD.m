@@ -42,13 +42,11 @@ BOOL isSolidState(UInt8 const *cpath)
             CFStringRef idStr = NULL;
             if (noErr == FSCopyDiskIDForVolume(volCatInfo.volume, &idStr))
             {
-                NSString *str = (NSString*)idStr;
+                NSString *str = (NSString*)CFBridgingRelease(idStr);
                 //NSLog(@"Checking bsd disk %@",str);
 
                 // create matching dictionary
                 classesToMatch = IOBSDNameMatching(kIOMasterPortDefault,0,[str UTF8String]);
-
-                if (idStr) CFRelease(idStr);
             }
         }
     }
@@ -71,7 +69,7 @@ BOOL isSolidState(UInt8 const *cpath)
 
     // iterate over all found medias
     io_object_t serviceEntry, parentMedia;
-    while (serviceEntry = IOIteratorNext(entryIterator))
+    while ((serviceEntry = IOIteratorNext(entryIterator)))
     {
         int maxlevels = 8;
         do
@@ -91,10 +89,9 @@ BOOL isSolidState(UInt8 const *cpath)
             CFTypeRef res = IORegistryEntryCreateCFProperty(serviceEntry, CFSTR(kIOPropertyDeviceCharacteristicsKey), kCFAllocatorDefault, 0);
             if (res)
             {
-                NSString *type = [(NSDictionary*)res objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
+                NSString *type = [(NSDictionary*)CFBridgingRelease(res) objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
                 //NSLog(@"Found disk %@",res);
                 isSolidState = [@"Solid State" isEqualToString:type]; type = nil;
-                CFRelease(res);
                 if (isSolidState) break;
             }
         }
