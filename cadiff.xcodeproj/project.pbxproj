@@ -10,6 +10,7 @@
 		75765584195772A40035427F /* SSD.m in Sources */ = {isa = PBXBuildFile; fileRef = 75765583195772A40035427F /* SSD.m */; };
 		75765587195789B20035427F /* System.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75765586195789B20035427F /* System.framework */; };
 		75765589195789E70035427F /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75765588195789E70035427F /* IOKit.framework */; };
+		7576558B1957A2F90035427F /* Logging.m in Sources */ = {isa = PBXBuildFile; fileRef = 7576558A1957A2F90035427F /* Logging.m */; };
 		75B27C0817F29DC400D86FDF /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75B27C0717F29DC400D86FDF /* Foundation.framework */; };
 		75B27C0B17F29DC400D86FDF /* cadiff.m in Sources */ = {isa = PBXBuildFile; fileRef = 75B27C0A17F29DC400D86FDF /* cadiff.m */; };
 		75B27C0F17F29DC400D86FDF /* cadiff.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = 75B27C0E17F29DC400D86FDF /* cadiff.1 */; };
@@ -33,6 +34,8 @@
 		75765585195772FD0035427F /* SSD.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SSD.h; sourceTree = "<group>"; };
 		75765586195789B20035427F /* System.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = System.framework; path = ../../../../System/Library/Frameworks/System.framework; sourceTree = "<group>"; };
 		75765588195789E70035427F /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
+		7576558A1957A2F90035427F /* Logging.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = Logging.m; sourceTree = "<group>"; };
+		7576558C1957A32E0035427F /* Logging.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Logging.h; sourceTree = "<group>"; };
 		75B27C0417F29DC400D86FDF /* cadiff */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = cadiff; sourceTree = BUILT_PRODUCTS_DIR; };
 		75B27C0717F29DC400D86FDF /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		75B27C0A17F29DC400D86FDF /* cadiff.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = cadiff.m; sourceTree = "<group>"; };
@@ -88,6 +91,8 @@
 			isa = PBXGroup;
 			children = (
 				75B27C0A17F29DC400D86FDF /* cadiff.m */,
+				7576558A1957A2F90035427F /* Logging.m */,
+				7576558C1957A32E0035427F /* Logging.h */,
 				75765583195772A40035427F /* SSD.m */,
 				75765585195772FD0035427F /* SSD.h */,
 				75B27C0E17F29DC400D86FDF /* cadiff.1 */,
@@ -158,6 +163,7 @@
 			files = (
 				75765584195772A40035427F /* SSD.m in Sources */,
 				75B27C0B17F29DC400D86FDF /* cadiff.m in Sources */,
+				7576558B1957A2F90035427F /* Logging.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

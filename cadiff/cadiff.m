@@ -25,17 +25,14 @@
 
 #import <Foundation/Foundation.h>
 
+#import "Logging.h"
 #import "SSD.h"
 
 
 // Flags
 static int fBenchmark = NO;
-static int fDebug = NO;
 static int fVerify = NO;
 
-
-#define LOG_DEBUG(format, ...) ({ if (fDebug) { printf(format, ## __VA_ARGS__); } })
-#define LOG_ERROR(format, ...) ({ fflush(stdout); fprintf(stderr, format, ## __VA_ARGS__); fflush(stderr); })
 
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
@@ -233,7 +230,7 @@ static void computeHashes(NSURL *files,
                                              if (1 == CC_SHA1_Final(hash, hashContext)) {
                                                  NSData *hashAsData = [NSData dataWithBytes:hash length:sizeof(hash)];
 
-                                                 if (fDebug) {
+                                                 if (debugLoggingEnabled) {
                                                      LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
                                                  } else {
                                                      printf("⎍"); fflush(stdout);
@@ -473,14 +470,34 @@ static NSString* prettyFormatURLSet(NSSet *set) NOT_NULL(1) {
     }
 }
 
+BOOL purge(void) {
+    int err = system("/usr/bin/purge");
+
+    if (0 == err) {
+        return YES;
+    } else {
+        LOG_DEBUG("Unable to run /usr/bin/purge, error #%d (errno %d - %s).\n", err, errno, strerror(errno));
+
+        err = system("/usr/sbin/purge");
+
+        if (0 == err) {
+            return YES;
+        } else {
+            LOG_ERROR("Unable to run /usr/sbin/purge, error #%d (errno %d - %s).\n", err, errno, strerror(errno));
+        }
+    }
+
+    return NO;
+}
+
 int main(int argc, char* const argv[]) NOT_NULL(2) {
     static const struct option longOptions[] = {
-        {"benchmark",           no_argument,        &fBenchmark,    YES},
-        {"debug",               no_argument,        &fDebug,        YES},
-        {"hashInputSizeLimit",  required_argument,  NULL,           1},
-        {"help",                no_argument,        NULL,           'h'},
-        {"verify",              no_argument,        &fVerify,       YES},
-        {NULL,                  0,                  NULL,           0}
+        {"benchmark",           no_argument,        &fBenchmark,            YES},
+        {"debug",               no_argument,        &debugLoggingEnabled,   YES},
+        {"hashInputSizeLimit",  required_argument,  NULL,                   1},
+        {"help",                no_argument,        NULL,                   'h'},
+        {"verify",              no_argument,        &fVerify,               YES},
+        {NULL,                  0,                  NULL,                   0}
     };
 
     size_t hashInputSizeLimit = 1ULL << 20;
@@ -528,7 +545,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
     }
 
     if (fBenchmark) {
-        assert(0 == system("/usr/bin/purge"));
+        assert(purge());
     }
 
     @autoreleasepool {
@@ -585,7 +602,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         NSMutableOrderedSet *onlyInB = [NSMutableOrderedSet orderedSet];
 
         if (fBenchmark) {
-            assert(0 == system("/usr/bin/purge"));
+            assert(purge());
         }
 
         printf("Comparing suspects"); fflush(stdout);
@@ -614,7 +631,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                     dispatch_group_leave(dispatchGroup);
                                 });
                             } else {
-                                if (fDebug) {
+                                if (debugLoggingEnabled) {
                                     LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
                                 } else {
                                     printf("△"); fflush(stdout);

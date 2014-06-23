@@ -33,25 +33,27 @@
 #include <IOKit/storage/IOMedia.h>
 #include <IOKit/Kext/KextManager.h>
 
+#import "Logging.h"
+
 
 BOOL isSolidState(dev_t dev, BOOL *isSSD) {
     io_iterator_t entryIterator;
 
     {
         CFMutableDictionaryRef classesToMatch = IOServiceMatching("IOMedia");
-
         if (classesToMatch) {
             CFDictionaryAddValue(classesToMatch, CFSTR("BSD Major"), (__bridge const void *)@(major(dev)));
             CFDictionaryAddValue(classesToMatch, CFSTR("BSD Minor"), (__bridge const void *)@(minor(dev)));
-            NSLog(@"Will try to match I/O registry entires with: %@", classesToMatch);
+            LOG_DEBUG("Will try to match I/O registry entires with: %s\n", ((__bridge NSDictionary*)classesToMatch).description.UTF8String);
         } else {
-            NSLog(@"Failed to create I/O registery matcher for IOMedias (logical volumes).");
+            LOG_ERROR("Failed to create I/O registery matcher for IOMedias (logical volumes).");
             return NO;
         }
 
         // IOServiceGetMatchingServices() CFReleases classesToMatch (even if it returns an error).
-        if (KERN_SUCCESS != IOServiceGetMatchingServices(kIOMasterPortDefault, classesToMatch, &entryIterator)) {
-            NSLog(@"Can't iterate services");
+        const kern_return_t err = IOServiceGetMatchingServices(kIOMasterPortDefault, classesToMatch, &entryIterator);
+        if (KERN_SUCCESS != err) {
+            LOG_ERROR("Can't iterate IOMedia services, error #%d.\n", err);
             return NO;
         }
     }
@@ -67,15 +69,14 @@ BOOL isSolidState(dev_t dev, BOOL *isSSD) {
                 strlcpy(mediaName, "Unknown", sizeof(mediaName));
             }
 
-            NSLog(@"Found IOMedia \"%s\".", mediaName);
+            LOG_DEBUG("Found IOMedia \"%s\".", mediaName);
         }
 
         int maxlevels = 8;
         do {
-            kern_return_t kernResult = IORegistryEntryGetParentEntry(serviceEntry, kIOServicePlane, &parentMedia);
-
+            const kern_return_t kernResult = IORegistryEntryGetParentEntry(serviceEntry, kIOServicePlane, &parentMedia);
             if (KERN_SUCCESS != kernResult) {
-                NSLog(@"Error while getting parent service entry");
+                LOG_DEBUG("Error #%d while getting parent service entry.\n", kernResult);
                 break;
             }
 
@@ -85,10 +86,10 @@ BOOL isSolidState(dev_t dev, BOOL *isSSD) {
 
             CFTypeRef res = IORegistryEntryCreateCFProperty(serviceEntry, CFSTR(kIOPropertyDeviceCharacteristicsKey), kCFAllocatorDefault, 0);
             if (res) {
-                NSString *type = [(__bridge NSDictionary*)res objectForKey:(id)CFSTR(kIOPropertyMediumTypeKey)];
+                NSDictionary *result = CFBridgingRelease(res);
+                NSString *type = result[@(kIOPropertyMediumTypeKey)];
                 isSolidState = [@"Solid State" isEqualToString:type];
-                NSLog(@"Found %sSSD disk %@", (isSolidState ? "" : "non-"), res);
-                CFRelease(res);
+                LOG_DEBUG("Found %sSSD disk %s", (isSolidState ? "" : "non-"), result.description.UTF8String);
             }
         } while(!isSolidState && maxlevels--);
 
