@@ -149,7 +149,7 @@ static void computeHashes(NSURL *files,
 
         if (!fileEnumerator) {
             fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
-                                                includingPropertiesForKeys:@[NSURLVolumeUUIDStringKey, NSURLIsDirectoryKey]
+                                                includingPropertiesForKeys:@[NSURLIsDirectoryKey]
                                                                    options:NSDirectoryEnumerationSkipsHiddenFiles
                                                               errorHandler:^(NSURL *url, NSError *error) {
                 LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
