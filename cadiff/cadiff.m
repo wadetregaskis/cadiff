@@ -100,7 +100,7 @@ static void recordHash(NSURL *file,
     if (debugLoggingEnabled) {
         LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hash.description.UTF8String);
     } else {
-        printf("⎍"); fflush(stdout);
+        printf("⎍");
     }
 
     dispatch_async(syncQueue, ^{
@@ -634,8 +634,12 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             dispatch_semaphore_signal(bHashingDone);
         });
 
-        dispatch_semaphore_wait(aHashingDone, DISPATCH_TIME_FOREVER);
-        dispatch_semaphore_wait(bHashingDone, DISPATCH_TIME_FOREVER);
+        while (0 != dispatch_semaphore_wait(aHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+            fflush(stdout);
+        }
+        while (0 != dispatch_semaphore_wait(bHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+            fflush(stdout);
+        }
 
         if (!successful) {
             return -1;
@@ -676,7 +680,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                             if (compareFiles(file, potentialDuplicate)) {
-                                printf("▲"); fflush(stdout);
+                                printf("▲");
 
                                 dispatch_async(syncQueue, ^{
                                     addValueToKey(aDuplicates, file, potentialDuplicate);
@@ -687,7 +691,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                 if (debugLoggingEnabled) {
                                     LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
                                 } else {
-                                    printf("△"); fflush(stdout);
+                                    printf("△");
                                 }
 
                                 dispatch_group_leave(dispatchGroup);
