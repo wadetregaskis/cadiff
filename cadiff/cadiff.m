@@ -53,7 +53,7 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            invocationString);
 }
 
-static dispatch_io_t openFile(NSURL *file, dispatch_semaphore_t concurrencyLimiter) {
+static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, dispatch_semaphore_t concurrencyLimiter) {
     dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
                                                         file.path.UTF8String,
                                                         O_RDONLY | O_NOFOLLOW | O_NONBLOCK,
@@ -74,8 +74,8 @@ static dispatch_io_t openFile(NSURL *file, dispatch_semaphore_t concurrencyLimit
         return NULL;
     }
 
-    dispatch_io_set_high_water(fileIO, 16ULL << 20);
-    dispatch_io_set_low_water(fileIO, 128ULL << 10);
+    dispatch_io_set_high_water(fileIO, MIN(expectedExtentOfReading, 16ULL << 20));
+    dispatch_io_set_low_water(fileIO, MIN(expectedExtentOfReading, 128ULL << 10));
 
     return fileIO;
 }
@@ -86,6 +86,10 @@ static void computeHashes(NSURL *files,
                           NSMutableDictionary *hashesToURLs,
                           dispatch_queue_t syncQueue,
                           void (^completionBlock)(BOOL)) NOT_NULL(1, 3, 4) {
+    if (0 >= hashInputSizeLimit) {
+        hashInputSizeLimit = SIZE_MAX;
+    }
+
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL allGood = YES;
 
@@ -171,7 +175,7 @@ static void computeHashes(NSURL *files,
 
             dispatch_semaphore_t concurrencyLimiter = (isOnSSD ? ssdConcurrencyLimiter : spindleConcurrencyLimiter);
 
-            dispatch_io_t fileIO = openFile(file, concurrencyLimiter);
+            dispatch_io_t fileIO = openFile(file, hashInputSizeLimit, concurrencyLimiter);
 
             if (!fileIO) {
                 allGood = NO;
@@ -206,7 +210,7 @@ static void computeHashes(NSURL *files,
 
                 dispatch_io_read(fileIO,
                                  0,
-                                 ((0 < hashInputSizeLimit) ? hashInputSizeLimit : SIZE_MAX),
+                                 hashInputSizeLimit,
                                  dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
                                  ^(bool done, dispatch_data_t data, int error) {
                                      if (!done && !allGood) {
@@ -312,7 +316,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
         return YES;
     }
 
-    off_t aSize = sizeOfFile(a);
+    const off_t aSize = sizeOfFile(a);
 
     if ((0 > aSize) || (aSize != sizeOfFile(b))) {
         return NO;
@@ -320,10 +324,10 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
     __block BOOL same = NO;
 
-    dispatch_io_t aIO = openFile(a, NULL);
+    dispatch_io_t aIO = openFile(a, aSize, NULL);
 
     if (aIO) {
-        dispatch_io_t bIO = openFile(b, NULL);
+        dispatch_io_t bIO = openFile(b, aSize, NULL);
 
         if (bIO) {
             dispatch_queue_t compareQueue = dispatch_queue_create("Compare Queue", DISPATCH_QUEUE_SERIAL);
