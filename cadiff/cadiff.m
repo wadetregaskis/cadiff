@@ -31,12 +31,15 @@
 
 // Flags
 static int fBenchmark = NO;
+static unsigned long fSSDConcurrencyLimit = 64; // SATA NCQ has a limit of ~32 outstanding I/Os to the actual drive.  So one might assume we need only pick something larger-enough than this to account for any overhead and additional queuing in the OS.
+static unsigned long fSpindleConcurrencyLimit = 4;
 static int fVerify = NO;
 
 
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
 static void usage(const char *invocationString) NOT_NULL(1) {
+    // This deliberately doesn't include all flags (e.g. those for concurrency limits) because such flags are really only intended for debugging, benchmarking, etc.
     printf("Usage: %s [FLAGS] A B\n"
            "\n"
            "A and B are two files or two folders to compare.\n"
@@ -117,7 +120,8 @@ static void computeHashes(NSURL *files,
             }
         }
 
-        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
+        dispatch_semaphore_t ssdConcurrencyLimiter = dispatch_semaphore_create(fSSDConcurrencyLimit);
+        dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create(fSpindleConcurrencyLimit);
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:files.path].UTF8String, DISPATCH_QUEUE_SERIAL);
 
@@ -164,6 +168,8 @@ static void computeHashes(NSURL *files,
                     LOG_ERROR("Unable to determine the volume UUID of \"%s\" (in order to optimise I/Os to it), error: (%d) %s\n", file.path.UTF8String, errno, strerror(errno));
                 }
             }
+
+            dispatch_semaphore_t concurrencyLimiter = (isOnSSD ? ssdConcurrencyLimiter : spindleConcurrencyLimiter);
 
             dispatch_io_t fileIO = openFile(file, concurrencyLimiter);
 
@@ -492,12 +498,14 @@ BOOL purge(void) {
 
 int main(int argc, char* const argv[]) NOT_NULL(2) {
     static const struct option longOptions[] = {
-        {"benchmark",           no_argument,        &fBenchmark,            YES},
-        {"debug",               no_argument,        &debugLoggingEnabled,   YES},
-        {"hashInputSizeLimit",  required_argument,  NULL,                   1},
-        {"help",                no_argument,        NULL,                   'h'},
-        {"verify",              no_argument,        &fVerify,               YES},
-        {NULL,                  0,                  NULL,                   0}
+        {"benchmark",               no_argument,        &fBenchmark,            YES},
+        {"spindleConcurrencyLimit", required_argument,  NULL,                   2},
+        {"ssdConcurrencyLimit",     required_argument,  NULL,                   3},
+        {"debug",                   no_argument,        &debugLoggingEnabled,   YES},
+        {"hashInputSizeLimit",      required_argument,  NULL,                   1},
+        {"help",                    no_argument,        NULL,                   'h'},
+        {"verify",                  no_argument,        &fVerify,               YES},
+        {NULL,                      0,                  NULL,                   0}
     };
 
     size_t hashInputSizeLimit = 1ULL << 20;
@@ -514,6 +522,28 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                 if (!end || *end) {
                     LOG_ERROR("Invalid hash input size limit \"%s\" - must be a positive number (or zero).\n", optarg);
+                    return EINVAL;
+                }
+
+                break;
+            }
+            case 2: {
+                char *end = NULL;
+                fSpindleConcurrencyLimit = strtoul(optarg, &end, 0);
+
+                if (!end || *end || (1 > fSpindleConcurrencyLimit)) {
+                    LOG_ERROR("Invalid spindle concurrency limit \"%s\" - must be a positive number.\n", optarg);
+                    return EINVAL;
+                }
+                
+                break;
+            }
+            case 3: {
+                char *end = NULL;
+                fSSDConcurrencyLimit = strtoul(optarg, &end, 0);
+
+                if (!end || *end || (1 > fSSDConcurrencyLimit)) {
+                    LOG_ERROR("Invalid SSD concurrency limit \"%s\" - must be a positive number.\n", optarg);
                     return EINVAL;
                 }
 
