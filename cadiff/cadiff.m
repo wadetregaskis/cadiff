@@ -704,7 +704,9 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             }
         }];
 
-        dispatch_group_wait(dispatchGroup, DISPATCH_TIME_FOREVER);
+        while (0 != dispatch_group_wait(dispatchGroup, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+            fflush(stdout);
+        }
 
         for (NSURL *file in aURLsToHashes) {
             if (!aDuplicates[file]) {
