@@ -531,7 +531,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         {NULL,                      0,                  NULL,                   0}
     };
 
-    size_t hashInputSizeLimit = 1ULL << 20;
+    size_t hashInputSizeLimit = 512;
 
     int optionIndex = 0;
     while (-1 != (optionIndex = getopt_long(argc, argv, "h", longOptions, NULL))) {
