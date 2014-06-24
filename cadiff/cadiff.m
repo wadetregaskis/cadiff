@@ -80,16 +80,58 @@ static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, dispa
     return fileIO;
 }
 
+static off_t sizeOfFile(NSURL *file) NOT_NULL(1) {
+    struct stat stats;
+
+    if (0 == lstat(file.path.UTF8String, &stats)) {
+        return stats.st_size;
+    } else {
+        LOG_ERROR("Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+        return OFF_MIN;
+    }
+}
+
+static void recordHash(NSURL *file,
+                       NSData *hash,
+                       dispatch_queue_t syncQueue,
+                       NSMutableDictionary *URLsToHashes,
+                       NSMutableDictionary *hashesToURLs,
+                       dispatch_group_t dispatchGroup) {
+    if (debugLoggingEnabled) {
+        LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hash.description.UTF8String);
+    } else {
+        printf("⎍"); fflush(stdout);
+    }
+
+    dispatch_async(syncQueue, ^{
+        URLsToHashes[file] = hash;
+
+        NSMutableSet *existingEntry = hashesToURLs[hash];
+
+        if (existingEntry) {
+            NSMutableString *errorMessage = [NSMutableString stringWithFormat:@"Hash collision between \"%@\" and: ", file.path];
+
+            for (NSURL *otherFile in existingEntry) {
+                [errorMessage appendFormat:@"\"%@\" ", otherFile.path];
+            }
+
+            LOG_ERROR("%s\n", errorMessage.UTF8String);
+
+            [existingEntry addObject:file];
+        } else {
+            hashesToURLs[hash] = [NSMutableSet setWithObject:file];
+        }
+
+        dispatch_group_leave(dispatchGroup);
+    });
+}
+
 static void computeHashes(NSURL *files,
                           size_t hashInputSizeLimit,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
                           dispatch_queue_t syncQueue,
                           void (^completionBlock)(BOOL)) NOT_NULL(1, 3, 4) {
-    if (0 >= hashInputSizeLimit) {
-        hashInputSizeLimit = SIZE_MAX;
-    }
-
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL allGood = YES;
 
@@ -174,123 +216,111 @@ static void computeHashes(NSURL *files,
             }
 
             dispatch_semaphore_t concurrencyLimiter = (isOnSSD ? ssdConcurrencyLimiter : spindleConcurrencyLimiter);
+            dispatch_io_t fileIO;
 
-            dispatch_io_t fileIO = openFile(file, hashInputSizeLimit, concurrencyLimiter);
+            if (0 < hashInputSizeLimit) {
+                fileIO = openFile(file, hashInputSizeLimit, concurrencyLimiter);
 
-            if (!fileIO) {
-                allGood = NO;
-                break;
+                if (!fileIO) {
+                    allGood = NO;
+                    break;
+                }
             }
 
             dispatch_group_enter(dispatchGroup);
             dispatch_async(jobQueue, ^{
-                CC_SHA1_CTX *hashContext;
+                CC_SHA1_CTX *hashContext = NULL;
 
-                if (allGood) {
-                    hashContext = malloc(sizeof(*hashContext));
+                if (fileIO) {
+                    if (allGood) {
+                        hashContext = malloc(sizeof(*hashContext));
 
-                    if (hashContext) {
-                        if (1 != CC_SHA1_Init(hashContext)) {
-                            LOG_ERROR("Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
+                        if (hashContext) {
+                            if (1 != CC_SHA1_Init(hashContext)) {
+                                LOG_ERROR("Unable to initialise hash context (for \"%s\").\n", file.path.UTF8String);
+                                allGood = NO;
+                                free(hashContext);
+                            }
+                        } else {
+                            LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
                             allGood = NO;
-                            free(hashContext);
                         }
-                    } else {
-                        LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
-                        allGood = NO;
                     }
-                }
 
-                if (!allGood) {
-                    dispatch_group_leave(dispatchGroup);
-                    return;
+                    if (!allGood) {
+                        dispatch_group_leave(dispatchGroup);
+                        return;
+                    }
                 }
 
                 dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
 
-                dispatch_io_read(fileIO,
-                                 0,
-                                 hashInputSizeLimit,
-                                 dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
-                                 ^(bool done, dispatch_data_t data, int error) {
-                                     if (!done && !allGood) {
-                                         dispatch_io_close(fileIO, DISPATCH_IO_STOP);
-                                         return;
-                                     }
+                const off_t fileSize = sizeOfFile(file);
+                NSData *fileSizeAsData = [NSData dataWithBytes:&fileSize length:sizeof(fileSize)];
 
-                                     if (0 == error) {
-                                         dispatch_data_apply(data,
-                                                             ^bool(dispatch_data_t region,
-                                                                   size_t offset,
-                                                                   const void *buffer,
-                                                                   size_t size) {
-                                                                 if (1 == CC_SHA1_Update(hashContext, buffer, (CC_LONG)size)) {
-                                                                     return true;
-                                                                 } else {
-                                                                     LOG_ERROR("Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
-                                                                     allGood = NO;
-                                                                     dispatch_io_close(fileIO, DISPATCH_IO_STOP);
-                                                                     return false;
-                                                                 }
-                                                             });
+                if (hashContext) {
+                    dispatch_io_read(fileIO,
+                                     0,
+                                     hashInputSizeLimit,
+                                     dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0),
+                                     ^(bool done, dispatch_data_t data, int error) {
+                                         if (!done && !allGood) {
+                                             dispatch_io_close(fileIO, DISPATCH_IO_STOP);
+                                             return;
+                                         }
+
+                                         if (0 == error) {
+                                             dispatch_data_apply(data,
+                                                                 ^bool(dispatch_data_t region,
+                                                                       size_t offset,
+                                                                       const void *buffer,
+                                                                       size_t size) {
+                                                                     if (1 == CC_SHA1_Update(hashContext, buffer, (CC_LONG)size)) {
+                                                                         return true;
+                                                                     } else {
+                                                                         LOG_ERROR("Error computing SHA1 on bytes [%zu, %zu] in \"%s\".\n", offset, offset + size - 1, file.path.UTF8String);
+                                                                         allGood = NO;
+                                                                         dispatch_io_close(fileIO, DISPATCH_IO_STOP);
+                                                                         return false;
+                                                                     }
+                                                                 });
+
+                                             if (done) {
+                                                 unsigned char hash[CC_SHA1_DIGEST_LENGTH];
+
+                                                 if (1 == CC_SHA1_Final(hash, hashContext)) {
+                                                     NSMutableData *hashAsData = [fileSizeAsData mutableCopy];
+                                                     [hashAsData appendBytes:hash length:sizeof(hash)];
+
+                                                     recordHash(file, hashAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup);
+                                                 } else {
+                                                     LOG_ERROR("Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
+                                                     dispatch_group_leave(dispatchGroup);
+                                                 }
+                                             }
+                                         } else {
+                                             if (ECANCELED != error) {
+                                                 LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), file.path.UTF8String);
+                                                 dispatch_io_close(fileIO, DISPATCH_IO_STOP);  // I feel like this should be redundant, but everyone else seems to be dispatch_io_closing on error, religiously.  So I've joined the cult.
+                                             }
+
+                                             allGood = NO;
+                                         }
 
                                          if (done) {
-                                             unsigned char hash[CC_SHA1_DIGEST_LENGTH];
+                                             free(hashContext);
 
-                                             if (1 == CC_SHA1_Final(hash, hashContext)) {
-                                                 NSData *hashAsData = [NSData dataWithBytes:hash length:sizeof(hash)];
+                                             // There's a delay between here and when the actual file descriptor is released.  It's an undefined delay - it depends on various queues' activity etc.  It's a pain because if we were to signal concurrencyLimiter here, it'd try to use another file descriptor potentially sooner than we release this one.  Repeat enough times and you run out of file descriptors.  So the obvious thing to do is call dispatch_io_close() right here.  That does in fact address that particular problem.  But it also, in the case where (0 == error && done), triggers a use-after-free bug in libdispatch (io.c:1261 in the source currently on libdispatch.macosforge.org).  It appears to be a genuine bug in libdispatch (rdar://problem/15109142), with no direct workaround I can find.  So the indirect workaround is to wait until the actual "close" block is run, in order to signal concurrencyLimiter.  And that was setup by openFile() at dispatch_io_t-creation time.
 
-                                                 if (debugLoggingEnabled) {
-                                                     LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hashAsData.description.UTF8String);
-                                                 } else {
-                                                     printf("⎍"); fflush(stdout);
-                                                 }
-
-                                                 dispatch_async(syncQueue, ^{
-                                                     URLsToHashes[file] = hashAsData;
-
-                                                     NSMutableSet *existingEntry = hashesToURLs[hashAsData];
-
-                                                     if (existingEntry) {
-                                                         NSMutableString *errorMessage = [NSMutableString stringWithFormat:@"Hash collision between \"%@\" and: ", file.path];
-
-                                                         for (NSURL *otherFile in existingEntry) {
-                                                             [errorMessage appendFormat:@"\"%@\" ", otherFile.path];
-                                                         }
-
-                                                         LOG_ERROR("%s\n", errorMessage.UTF8String);
-
-                                                         [existingEntry addObject:file];
-                                                     } else {
-                                                         hashesToURLs[hashAsData] = [NSMutableSet setWithObject:file];
-                                                     }
-
-                                                     dispatch_group_leave(dispatchGroup);
-                                                 });
-                                             } else {
-                                                 LOG_ERROR("Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
+                                             if (0 != error) {
                                                  dispatch_group_leave(dispatchGroup);
                                              }
                                          }
-                                     } else {
-                                         if (ECANCELED != error) {
-                                             LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), file.path.UTF8String);
-                                             dispatch_io_close(fileIO, DISPATCH_IO_STOP);  // I feel like this should be redundant, but everyone else seems to be dispatch_io_closing on error, religiously.  So I've joined the cult.
-                                         }
-
-                                         allGood = NO;
-                                     }
-
-                                     if (done) {
-                                         free(hashContext);
-
-                                         // There's a delay between here and when the actual file descriptor is released.  It's an undefined delay - it depends on various queues' activity etc.  It's a pain because if we were to signal concurrencyLimiter here, it'd try to use another file descriptor potentially sooner than we release this one.  Repeat enough times and you run out of file descriptors.  So the obvious thing to do is call dispatch_io_close() right here.  That does in fact address that particular problem.  But it also, in the case where (0 == error && done), triggers a use-after-free bug in libdispatch (io.c:1261 in the source currently on libdispatch.macosforge.org).  It appears to be a genuine bug in libdispatch (rdar://problem/15109142), with no direct workaround I can find.  So the indirect workaround is to wait until the actual "close" block is run, in order to signal concurrencyLimiter.  And that was setup by openFile() at dispatch_io_t-creation time.
-
-                                         if (0 != error) {
-                                             dispatch_group_leave(dispatchGroup);
-                                         }
-                                     }
-                                 });
+                                     });
+                } else {
+                    recordHash(file, fileSizeAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup);
+                    dispatch_semaphore_signal(concurrencyLimiter);
+                }
             });
         }
 
@@ -298,17 +328,6 @@ static void computeHashes(NSURL *files,
             completionBlock(allGood);
         });
     });
-}
-
-static off_t sizeOfFile(NSURL *file) NOT_NULL(1) {
-    struct stat stats;
-
-    if (0 == lstat(file.path.UTF8String, &stats)) {
-        return stats.st_size;
-    } else {
-        LOG_ERROR("Unable to stat \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-        return OFF_MIN;
-    }
 }
 
 static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
