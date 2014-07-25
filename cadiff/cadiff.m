@@ -519,6 +519,44 @@ BOOL purge(void) {
     return NO;
 }
 
+NSString* formatTimeInterval(NSTimeInterval interval) {
+    const int hours = (int)floor(interval / 3600);
+    interval -= (hours * 3600);
+    const int minutes = (int)floor(interval / 60);
+    interval -= (minutes * 60);
+    const int seconds = (int)floor(interval);
+
+    if (0 < hours) {
+        return [NSString stringWithFormat:@"%dh %dm %ds", hours, minutes, seconds];
+    } else if (0 < minutes) {
+        return [NSString stringWithFormat:@"%dm %ds", minutes, seconds];
+    } else {
+        return [NSString stringWithFormat:@"%ds", seconds];
+    }
+}
+
+void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
+    const int dotCount = (int)(progress * 100);
+
+    if ((dotCount == *lastProgressPrinted) && ((nil == *lastUpdateTime) || (5 > -[*lastUpdateTime timeIntervalSinceNow]))) {
+        return;
+    }
+
+    char dots[dotCount + 1];
+    memset(dots, '*', sizeof(dots));
+    dots[dotCount] = 0;
+
+    printf("\33[2K\r %3d%% [%-100s] %s remaining",
+           dotCount,
+           dots,
+           ((10 <= -[startTime timeIntervalSinceNow])
+            ? formatTimeInterval(-[startTime timeIntervalSinceNow] * ((1 / progress) - 1)).UTF8String
+            : "estimating time"));
+
+    *lastProgressPrinted = dotCount;
+    *lastUpdateTime = [NSDate date];
+}
+
 int main(int argc, char* const argv[]) NOT_NULL(2) {
     static const struct option longOptions[] = {
         {"benchmark",               no_argument,        &fBenchmark,            YES},
@@ -662,7 +700,15 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             assert(purge());
         }
 
-        printf("Comparing suspects"); fflush(stdout);
+        __block NSInteger totalSuspects = 0;
+
+        [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
+            totalSuspects += [bHashesToURLs[hash] count];
+        }];
+
+        __block NSInteger suspectsAnalysedSoFar = 0;
+        printf("Comparing %ld suspected duplicates...\n", totalSuspects); fflush(stdout);
+        NSDate *startTime = [NSDate date];
 
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
@@ -680,8 +726,6 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                             if (compareFiles(file, potentialDuplicate)) {
-                                printf("▲");
-
                                 dispatch_async(syncQueue, ^{
                                     addValueToKey(aDuplicates, file, potentialDuplicate);
                                     addValueToKey(bDuplicates, potentialDuplicate, file);
@@ -690,12 +734,12 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                             } else {
                                 if (debugLoggingEnabled) {
                                     LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
-                                } else {
-                                    printf("△");
                                 }
 
                                 dispatch_group_leave(dispatchGroup);
                             }
+
+                            ++suspectsAnalysedSoFar;
 
                             dispatch_semaphore_signal(concurrencyLimiter);
                         });
@@ -704,9 +748,15 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             }
         }];
 
+        int lastProgressPrinted = -1;
+        NSDate *lastUpdateTime;
+
         while (0 != dispatch_group_wait(dispatchGroup, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+            showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
             fflush(stdout);
         }
+
+        showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
 
         for (NSURL *file in aURLsToHashes) {
             if (!aDuplicates[file]) {
