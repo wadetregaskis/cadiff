@@ -566,6 +566,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         {"hashInputSizeLimit",      required_argument,  NULL,                   1},
         {"help",                    no_argument,        NULL,                   'h'},
         {"verify",                  no_argument,        &fVerify,               YES},
+        {"version",                 no_argument,        NULL,                   4},
         {NULL,                      0,                  NULL,                   0}
     };
 
@@ -610,6 +611,10 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                 break;
             }
+            case 4:
+                printf("Source version " __TIMESTAMP__ ".\n");
+                printf("Built using " __VERSION__ " at " __TIME__ " on " __DATE__ ".\n");
+                return 0;
             case 'h':
                 usage(argv[0]);
                 return 0;
