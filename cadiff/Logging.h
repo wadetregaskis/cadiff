@@ -12,5 +12,6 @@
 
 extern int debugLoggingEnabled;
 
-#define LOG_DEBUG(format, ...) ({ if (debugLoggingEnabled) { printf(format, ## __VA_ARGS__); } })
-#define LOG_ERROR(format, ...) ({ fflush(stdout); fprintf(stderr, format, ## __VA_ARGS__); fflush(stderr); })
+#define LOG_DEBUG(format, ...) ({ if (debugLoggingEnabled) { printf("Debug: " format, ## __VA_ARGS__); } })
+#define LOG_WARNING(format, ...) ({ fflush(stdout); fprintf(stderr, "WARNING: " format, ## __VA_ARGS__); fflush(stderr); })
+#define LOG_ERROR(format, ...) ({ fflush(stdout); fprintf(stderr, "ERROR: " format, ## __VA_ARGS__); fflush(stderr); })

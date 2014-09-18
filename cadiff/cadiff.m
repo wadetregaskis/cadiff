@@ -53,21 +53,51 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            invocationString);
 }
 
-static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, dispatch_semaphore_t concurrencyLimiter) {
-    dispatch_io_t fileIO = dispatch_io_create_with_path(DISPATCH_IO_STREAM,
-                                                        file.path.UTF8String,
-                                                        O_RDONLY | O_NOFOLLOW | O_NONBLOCK,
-                                                        0,
-                                                        dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
-                                                        ^(int error) {
-                                                            if (0 != error) {
-                                                                LOG_ERROR("Error %d (%s) reading \"%s\".\n", error, strerror(error), file.path.UTF8String);
-                                                            }
+static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL cache, dispatch_semaphore_t concurrencyLimiter) {
+    const int fd = open(file.path.UTF8String, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
 
-                                                            if (concurrencyLimiter) {
-                                                                dispatch_semaphore_signal(concurrencyLimiter);
-                                                            }
-                                                        });
+    if (0 > fd) {
+        LOG_ERROR("Unable to open \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+        return NULL;
+    }
+
+    if (!cache) {
+        {
+            const int err = fcntl(fd, F_RDAHEAD, 0);
+
+            if (-1 == err) {
+                LOG_WARNING("Unable to disable read-ahead of \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+            }
+        }
+
+        {
+            const int err = fcntl(fd, F_NOCACHE, 1);
+
+            if (-1 == err) {
+                LOG_WARNING("Unable to disable caching of \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+            }
+        }
+    }
+
+    dispatch_io_t fileIO = dispatch_io_create(DISPATCH_IO_STREAM,
+                                              fd,
+                                              dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0),
+                                              ^(int error) {
+                                                  if (0 != error) {
+                                                      LOG_ERROR("Error %d (%s) reading \"%s\".\n", error, strerror(error), file.path.UTF8String);
+                                                  }
+
+                                                  const int err = close(fd);
+
+                                                  if (0 != err) {
+                                                      LOG_WARNING("Unable to close file descriptor %d (for \"%s\"), error #%d (%s).\n", fd, file.path.UTF8String, errno, strerror(errno));
+                                                  }
+
+                                                  if (concurrencyLimiter) {
+                                                      LOG_DEBUG("Signaling concurrency limiter %p from close handler for \"%s\".\n", concurrencyLimiter, file.path.UTF8String);
+                                                      dispatch_semaphore_signal(concurrencyLimiter);
+                                                  }
+                                              });
 
     if (!fileIO) {
         LOG_ERROR("Unable to create I/O stream for \"%s\".\n", file.path.UTF8String);
@@ -216,23 +246,18 @@ static void computeHashes(NSURL *files,
             }
 
             dispatch_semaphore_t concurrencyLimiter = (isOnSSD ? ssdConcurrencyLimiter : spindleConcurrencyLimiter);
-            dispatch_io_t fileIO;
-
-            if (0 < hashInputSizeLimit) {
-                fileIO = openFile(file, hashInputSizeLimit, concurrencyLimiter);
-
-                if (!fileIO) {
-                    allGood = NO;
-                    break;
-                }
-            }
 
             dispatch_group_enter(dispatchGroup);
             dispatch_async(jobQueue, ^{
+                dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+
+                dispatch_io_t fileIO;
                 CC_SHA1_CTX *hashContext = NULL;
 
-                if (fileIO) {
-                    if (allGood) {
+                if (allGood && (0 < hashInputSizeLimit)) {
+                    fileIO = openFile(file, hashInputSizeLimit, NO, concurrencyLimiter);
+
+                    if (fileIO) {
                         hashContext = malloc(sizeof(*hashContext));
 
                         if (hashContext) {
@@ -245,15 +270,24 @@ static void computeHashes(NSURL *files,
                             LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
                             allGood = NO;
                         }
-                    }
-
-                    if (!allGood) {
-                        dispatch_group_leave(dispatchGroup);
-                        return;
+                    } else {
+                        allGood = NO;
                     }
                 }
 
-                dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+                if (!allGood) {
+                    dispatch_group_leave(dispatchGroup);
+
+                    if (fileIO) {
+                        dispatch_io_close(fileIO, DISPATCH_IO_STOP);
+                    } else {
+                        // If we successfully created the fileIO then its error handler, as will be called when it's closed, will signal concurrencyLimiter.  Until then we can't signal concurrencyLimiter as the file descriptor (that concurrencyLimiter primarily tries to bound simultaneous use of) will still be open, and we risk running out of file descriptors.
+                        LOG_DEBUG("Signaling concurrency limiter %p from hash setup failure for \"%s\".\n", concurrencyLimiter, file.path.UTF8String);
+                        dispatch_semaphore_signal(concurrencyLimiter);
+                    }
+
+                    return;
+                }
 
                 const off_t fileSize = sizeOfFile(file);
                 NSData *fileSizeAsData = [NSData dataWithBytes:&fileSize length:sizeof(fileSize)];
@@ -319,6 +353,7 @@ static void computeHashes(NSURL *files,
                                      });
                 } else {
                     recordHash(file, fileSizeAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup);
+                    LOG_DEBUG("Signaling concurrency limiter %p from 'hash' length only for \"%s\".\n", concurrencyLimiter, file.path.UTF8String);
                     dispatch_semaphore_signal(concurrencyLimiter);
                 }
             });
@@ -343,10 +378,10 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
     __block BOOL same = NO;
 
-    dispatch_io_t aIO = openFile(a, aSize, NULL);
+    dispatch_io_t aIO = openFile(a, aSize, YES, NULL);
 
     if (aIO) {
-        dispatch_io_t bIO = openFile(b, aSize, NULL);
+        dispatch_io_t bIO = openFile(b, aSize, YES, NULL);
 
         if (bIO) {
             dispatch_queue_t compareQueue = dispatch_queue_create("Compare Queue", DISPATCH_QUEUE_SERIAL);
