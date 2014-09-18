@@ -126,14 +126,15 @@ static void recordHash(NSURL *file,
                        dispatch_queue_t syncQueue,
                        NSMutableDictionary *URLsToHashes,
                        NSMutableDictionary *hashesToURLs,
-                       dispatch_group_t dispatchGroup) {
+                       dispatch_group_t dispatchGroup,
+                       NSInteger *hashesComputedSoFar) {
     if (debugLoggingEnabled) {
         LOG_DEBUG("Hash for \"%s\" is %s.\n", file.path.UTF8String, hash.description.UTF8String);
-    } else {
-        printf("⎍");
     }
 
     dispatch_async(syncQueue, ^{
+        ++(*hashesComputedSoFar);
+
         URLsToHashes[file] = hash;
 
         NSMutableSet *existingEntry = hashesToURLs[hash];
@@ -161,6 +162,7 @@ static void computeHashes(NSURL *files,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
                           dispatch_queue_t syncQueue,
+                          NSInteger *hashesComputedSoFar,
                           void (^completionBlock)(BOOL)) NOT_NULL(1, 3, 4) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         __block BOOL allGood = YES;
@@ -326,7 +328,7 @@ static void computeHashes(NSURL *files,
                                                      NSMutableData *hashAsData = [fileSizeAsData mutableCopy];
                                                      [hashAsData appendBytes:hash length:sizeof(hash)];
 
-                                                     recordHash(file, hashAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup);
+                                                     recordHash(file, hashAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup, hashesComputedSoFar);
                                                  } else {
                                                      LOG_ERROR("Unable to conclude SHA1 of \"%s\".\n", file.path.UTF8String);
                                                      dispatch_group_leave(dispatchGroup);
@@ -352,7 +354,7 @@ static void computeHashes(NSURL *files,
                                          }
                                      });
                 } else {
-                    recordHash(file, fileSizeAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup);
+                    recordHash(file, fileSizeAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup, hashesComputedSoFar);
                     LOG_DEBUG("Signaling concurrency limiter %p from 'hash' length only for \"%s\".\n", concurrencyLimiter, file.path.UTF8String);
                     dispatch_semaphore_signal(concurrencyLimiter);
                 }
@@ -570,6 +572,10 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
     }
 }
 
+void showHashProgress(NSInteger count, NSDate *startTime) {
+    printf("\33[2K\rIndexing... %ld candidates scanned (in %s)", count, formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String);
+}
+
 void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
     const int dotCount = (int)(progress * 100);
 
@@ -690,13 +696,15 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
         dispatch_queue_t syncQueue = dispatch_queue_create("Sync Queue", DISPATCH_QUEUE_SERIAL);
 
-        printf("Indexing"); fflush(stdout);
+        printf("Indexing..."); fflush(stdout);
 
+        NSDate *startTime = [NSDate date];
         dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
         dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
         __block BOOL successful = YES;
+        __block NSInteger hashesComputedSoFar = 0;
 
-        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, ^(BOOL allGood) {
+        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -704,7 +712,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             dispatch_semaphore_signal(aHashingDone);
         });
 
-        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, ^(BOOL allGood) {
+        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -713,17 +721,20 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         });
 
         while (0 != dispatch_semaphore_wait(aHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+            showHashProgress(hashesComputedSoFar, startTime);
             fflush(stdout);
         }
         while (0 != dispatch_semaphore_wait(bHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+            showHashProgress(hashesComputedSoFar, startTime);
             fflush(stdout);
         }
+
+        showHashProgress(hashesComputedSoFar, startTime);
+        printf(".\n");
 
         if (!successful) {
             return -1;
         }
-
-        printf("\n");
 
         LOG_DEBUG("Calculated %lu hashes for \"%s\", and %lu for \"%s\".\n",
                   (unsigned long)aURLsToHashes.count,
@@ -749,7 +760,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         if (0 < totalSuspects) {
             __block NSInteger suspectsAnalysedSoFar = 0;
             printf("Comparing %ld suspected duplicates...\n", totalSuspects); fflush(stdout);
-            NSDate *startTime = [NSDate date];
+
+            startTime = [NSDate date];
 
             dispatch_group_t dispatchGroup = dispatch_group_create();
             dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
