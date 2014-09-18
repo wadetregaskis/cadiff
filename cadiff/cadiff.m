@@ -38,6 +38,10 @@ static int fVerify = NO;
 
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
+
+NSNumberFormatter *decimalFormatter = nil;
+
+
 static void usage(const char *invocationString) NOT_NULL(1) {
     // This deliberately doesn't include all flags (e.g. those for concurrency limits) because such flags are really only intended for debugging, benchmarking, etc.
     printf("Usage: %s [FLAGS] A B\n"
@@ -90,7 +94,10 @@ static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL 
                                                   const int err = close(fd);
 
                                                   if (0 != err) {
-                                                      LOG_WARNING("Unable to close file descriptor %d (for \"%s\"), error #%d (%s).\n", fd, file.path.UTF8String, errno, strerror(errno));
+                                                      LOG_WARNING("Unable to close file descriptor %s (for \"%s\"), error #%d (%s).\n",
+                                                                  [decimalFormatter stringFromNumber:@(fd)].UTF8String,
+                                                                  file.path.UTF8String,
+                                                                  errno, strerror(errno));
                                                   }
 
                                                   if (concurrencyLimiter) {
@@ -573,7 +580,7 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
 }
 
 void showHashProgress(NSInteger count, NSDate *startTime) {
-    printf("\33[2K\rIndexing... %ld candidates scanned (in %s)", count, formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String);
+    printf("\33[2K\rIndexing... %s candidates scanned (in %s)", [decimalFormatter stringFromNumber:@(count)].UTF8String, formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String);
 }
 
 void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
@@ -599,6 +606,9 @@ void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTim
 }
 
 int main(int argc, char* const argv[]) NOT_NULL(2) {
+    decimalFormatter = [[NSNumberFormatter alloc] init];
+    decimalFormatter.numberStyle = NSNumberFormatterDecimalStyle;
+
     static const struct option longOptions[] = {
         {"benchmark",               no_argument,        &fBenchmark,            YES},
         {"spindleConcurrencyLimit", required_argument,  NULL,                   2},
@@ -736,10 +746,10 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             return -1;
         }
 
-        LOG_DEBUG("Calculated %lu hashes for \"%s\", and %lu for \"%s\".\n",
-                  (unsigned long)aURLsToHashes.count,
+        LOG_DEBUG("Calculated %s hashes for \"%s\", and %s for \"%s\".\n",
+                  [decimalFormatter stringFromNumber:@(aURLsToHashes.count)].UTF8String,
                   a.path.UTF8String,
-                  (unsigned long)bURLsToHashes.count,
+                  [decimalFormatter stringFromNumber:@(bURLsToHashes.count)].UTF8String,
                   b.path.UTF8String);
 
         NSMutableDictionary *aDuplicates = [NSMutableDictionary dictionary];
@@ -759,7 +769,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
         if (0 < totalSuspects) {
             __block NSInteger suspectsAnalysedSoFar = 0;
-            printf("Comparing %ld suspected duplicates...\n", totalSuspects); fflush(stdout);
+            printf("Comparing %s suspected duplicates...\n", [decimalFormatter stringFromNumber:@(totalSuspects)].UTF8String); fflush(stdout);
 
             startTime = [NSDate date];
 
