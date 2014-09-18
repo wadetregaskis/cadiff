@@ -746,57 +746,59 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             totalSuspects += [bHashesToURLs[hash] count];
         }];
 
-        __block NSInteger suspectsAnalysedSoFar = 0;
-        printf("Comparing %ld suspected duplicates...\n", totalSuspects); fflush(stdout);
-        NSDate *startTime = [NSDate date];
+        if (0 < totalSuspects) {
+            __block NSInteger suspectsAnalysedSoFar = 0;
+            printf("Comparing %ld suspected duplicates...\n", totalSuspects); fflush(stdout);
+            NSDate *startTime = [NSDate date];
 
-        dispatch_group_t dispatchGroup = dispatch_group_create();
-        dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
+            dispatch_group_t dispatchGroup = dispatch_group_create();
+            dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
 
-        [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
-            NSSet *potentialDuplicates = bHashesToURLs[hash];
+            [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
+                NSSet *potentialDuplicates = bHashesToURLs[hash];
 
-            if (potentialDuplicates) {
-                for (NSURL *potentialDuplicate in potentialDuplicates) {
-                    LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
+                if (potentialDuplicates) {
+                    for (NSURL *potentialDuplicate in potentialDuplicates) {
+                        LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
 
-                    dispatch_group_enter(dispatchGroup);
-                    dispatch_async(syncQueue, ^{
-                        dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+                        dispatch_group_enter(dispatchGroup);
+                        dispatch_async(syncQueue, ^{
+                            dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
 
-                        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                            if (compareFiles(file, potentialDuplicate)) {
-                                dispatch_async(syncQueue, ^{
-                                    addValueToKey(aDuplicates, file, potentialDuplicate);
-                                    addValueToKey(bDuplicates, potentialDuplicate, file);
+                            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                                if (compareFiles(file, potentialDuplicate)) {
+                                    dispatch_async(syncQueue, ^{
+                                        addValueToKey(aDuplicates, file, potentialDuplicate);
+                                        addValueToKey(bDuplicates, potentialDuplicate, file);
+                                        dispatch_group_leave(dispatchGroup);
+                                    });
+                                } else {
+                                    if (debugLoggingEnabled) {
+                                        LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
+                                    }
+
                                     dispatch_group_leave(dispatchGroup);
-                                });
-                            } else {
-                                if (debugLoggingEnabled) {
-                                    LOG_DEBUG("False positive between \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
                                 }
 
-                                dispatch_group_leave(dispatchGroup);
-                            }
+                                ++suspectsAnalysedSoFar;
 
-                            ++suspectsAnalysedSoFar;
-
-                            dispatch_semaphore_signal(concurrencyLimiter);
+                                dispatch_semaphore_signal(concurrencyLimiter);
+                            });
                         });
-                    });
+                    }
                 }
+            }];
+
+            int lastProgressPrinted = -1;
+            NSDate *lastUpdateTime;
+
+            while (0 != dispatch_group_wait(dispatchGroup, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+                showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
+                fflush(stdout);
             }
-        }];
 
-        int lastProgressPrinted = -1;
-        NSDate *lastUpdateTime;
-
-        while (0 != dispatch_group_wait(dispatchGroup, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
             showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
-            fflush(stdout);
         }
-
-        showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
 
         for (NSURL *file in aURLsToHashes) {
             if (!aDuplicates[file]) {
