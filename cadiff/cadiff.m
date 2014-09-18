@@ -820,6 +820,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             }
 
             showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
+            printf("\n");
         }
 
         for (NSURL *file in aURLsToHashes) {
@@ -834,7 +835,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             }
         }
 
-        printf("\n\n");
+        printf("\n");
 
         if (0 < aDuplicates.count) {
             NSMutableDictionary *duplicatePairs = [NSMutableDictionary dictionary];
