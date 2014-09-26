@@ -164,6 +164,62 @@ static void recordHash(NSURL *file,
     });
 }
 
+static const NSDirectoryEnumerationOptions kDirectoryEnumerationOptions = NSDirectoryEnumerationSkipsHiddenFiles;
+
+static void countCandidates(NSSet *fileURLs, dispatch_queue_t syncQueue, NSInteger *candidateCount) NOT_NULL(1, 3) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        __block NSInteger countSoFar = 0;
+        __block BOOL allGood = YES;
+
+        for (NSURL *files in fileURLs) {
+            NSNumber *isFolder;
+            NSError *err;
+
+            if ([files getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
+                if (![isFolder boolValue]) {
+                    ++countSoFar;
+                    continue;
+                }
+            } else {
+                LOG_ERROR("Unable to determine if \"%s\" is a folder or a file.  Assuming it's a folder.  Specific error was: %s\n", files.path.UTF8String, err.localizedDescription.UTF8String);
+            }
+
+            id fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
+                                                   includingPropertiesForKeys:@[NSURLIsDirectoryKey]
+                                                                      options:kDirectoryEnumerationOptions
+                                                                 errorHandler:^(NSURL *url, NSError *error) {
+                                                                     LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
+                                                                     allGood = NO;
+                                                                     return NO;
+                                                                 }];
+
+            if (!fileEnumerator) {
+                LOG_ERROR("Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
+                return;
+            }
+
+            for (NSURL *file in fileEnumerator) {
+                if (!allGood) {
+                    return;
+                }
+
+                if ([file getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err]) {
+                    if (![isFolder boolValue]) {
+                        ++countSoFar;
+                        continue;
+                    }
+                } else {
+                    LOG_ERROR("Unable to determine if \"%s\" is a folder or not (assuming it's not), error: %s\n", file.path.UTF8String, err.localizedDescription.UTF8String);
+                }
+            }
+        }
+
+        dispatch_async(syncQueue, ^{
+            *candidateCount = countSoFar;
+        });
+    });
+}
+
 static void computeHashes(NSURL *files,
                           size_t hashInputSizeLimit,
                           NSMutableDictionary *URLsToHashes,
@@ -189,7 +245,7 @@ static void computeHashes(NSURL *files,
         if (!fileEnumerator) {
             fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
                                                 includingPropertiesForKeys:@[NSURLIsDirectoryKey]
-                                                                   options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                                   options:kDirectoryEnumerationOptions
                                                               errorHandler:^(NSURL *url, NSError *error) {
                 LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
                 allGood = NO;
@@ -579,8 +635,19 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
     }
 }
 
-void showHashProgress(NSInteger count, NSDate *startTime) {
-    printf("\33[2K\rIndexing... %s candidates scanned (in %s)", [decimalFormatter stringFromNumber:@(count)].UTF8String, formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String);
+void showHashProgress(NSInteger countSoFar, NSInteger total, NSDate *startTime) {
+    NSString *ofTotalString;
+
+    if (0 < total) {
+        ofTotalString = [NSString stringWithFormat:@" (of %@)", [decimalFormatter stringFromNumber:@(total)]];
+    } else {
+        ofTotalString = @"";
+    }
+
+    printf("\33[2K\rIndexing... %s%s candidates scanned (in %s)",
+           [decimalFormatter stringFromNumber:@(countSoFar)].UTF8String,
+           ofTotalString.UTF8String,
+           formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String);
 }
 
 void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
@@ -708,6 +775,9 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
         printf("Indexing..."); fflush(stdout);
 
+        NSInteger candidateCount = 0;
+        countCandidates([NSSet setWithObjects:a, b, nil], syncQueue, &candidateCount);
+
         NSDate *startTime = [NSDate date];
         dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
         dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
@@ -731,15 +801,15 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         });
 
         while (0 != dispatch_semaphore_wait(aHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
-            showHashProgress(hashesComputedSoFar, startTime);
+            showHashProgress(hashesComputedSoFar, candidateCount, startTime);
             fflush(stdout);
         }
         while (0 != dispatch_semaphore_wait(bHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
-            showHashProgress(hashesComputedSoFar, startTime);
+            showHashProgress(hashesComputedSoFar, candidateCount, startTime);
             fflush(stdout);
         }
 
-        showHashProgress(hashesComputedSoFar, startTime);
+        showHashProgress(hashesComputedSoFar, candidateCount, startTime);
         printf(".\n");
 
         if (!successful) {
