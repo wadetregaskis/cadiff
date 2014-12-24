@@ -600,19 +600,19 @@ static NSString* prettyFormatURLSet(NSSet *set) NOT_NULL(1) {
 }
 
 BOOL purge(void) {
-    int err = system("/usr/bin/purge");
+    int err = system("/usr/sbin/purge");
 
     if (0 == err) {
         return YES;
     } else {
-        LOG_DEBUG("Unable to run /usr/bin/purge, error #%d (errno %d - %s).\n", err, errno, strerror(errno));
+        LOG_DEBUG("Unable to run /usr/sbin/purge, error #%d (errno %d - %s).\n", err, errno, strerror(errno));
 
-        err = system("/usr/sbin/purge");
+        err = system("/usr/bin/purge");
 
         if (0 == err) {
             return YES;
         } else {
-            LOG_ERROR("Unable to run /usr/sbin/purge, error #%d (errno %d - %s).\n", err, errno, strerror(errno));
+            LOG_ERROR("Unable to run /usr/bin/purge, error #%d (errno %d - %s).\n", err, errno, strerror(errno));
         }
     }
 
