@@ -29,6 +29,18 @@
 #import "SSD.h"
 
 
+// Declare a 'hidden' libdispatch function that we need to use to disable gratuitous read-ahead.
+void _dispatch_iocntl(uint32_t param, uint64_t value);
+
+// Likewise declare internal constants to use with the above function.
+#define DISPATCH_IOCNTL_CHUNK_PAGES 1
+#if TARGET_OS_EMBEDDED
+#define DIO_MAX_CHUNK_PAGES				128u //  512kB chunk size
+#else
+#define DIO_MAX_CHUNK_PAGES				256u // 1024kB chunk size
+#endif
+
+
 // Flags
 static int fBenchmark = NO;
 static unsigned long fSSDConcurrencyLimit = 64; // SATA NCQ has a limit of ~32 outstanding I/Os to the actual drive.  So one might assume we need only pick something larger-enough than this to account for any overhead and additional queuing in the OS.
@@ -805,6 +817,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         __block BOOL successful = YES;
         __block NSInteger hashesComputedSoFar = 0;
 
+        _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, MIN(hashInputSizeLimit / 512, DIO_MAX_CHUNK_PAGES));
+
         computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
@@ -836,6 +850,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         if (!successful) {
             return -1;
         }
+
+        _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, DIO_MAX_CHUNK_PAGES);
 
         LOG_DEBUG("Calculated %s hashes for \"%s\", and %s for \"%s\".\n",
                   [decimalFormatter stringFromNumber:@(aURLsToHashes.count)].UTF8String,
