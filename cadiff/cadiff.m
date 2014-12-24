@@ -57,12 +57,20 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            invocationString);
 }
 
-static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL cache, dispatch_semaphore_t concurrencyLimiter) {
+static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL cache, dispatch_semaphore_t concurrencyLimiter, BOOL *unsupportedFileType) {
     const int fd = open(file.path.UTF8String, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
 
+    *unsupportedFileType = NO;
+
     if (0 > fd) {
-        LOG_ERROR("Unable to open \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
-        return NULL;
+        if (ELOOP == errno) {
+            // The file is a symlink.  For now let's just ignore symlinks.  Perhaps in future we'll allow following of symlinks as long as they stay within the designated comparison directory, or something smarter like that.
+            *unsupportedFileType = YES;
+            return NULL;
+        } else {
+            LOG_ERROR("Unable to open \"%s\", error #%d (%s).\n", file.path.UTF8String, errno, strerror(errno));
+            return NULL;
+        }
     }
 
     if (!cache) {
@@ -320,7 +328,8 @@ static void computeHashes(NSURL *files,
                 CC_SHA1_CTX *hashContext = NULL;
 
                 if (allGood && (0 < hashInputSizeLimit)) {
-                    fileIO = openFile(file, hashInputSizeLimit, NO, concurrencyLimiter);
+                    BOOL unsupportedFileType = NO;
+                    fileIO = openFile(file, hashInputSizeLimit, NO, concurrencyLimiter, &unsupportedFileType);
 
                     if (fileIO) {
                         hashContext = malloc(sizeof(*hashContext));
@@ -335,6 +344,11 @@ static void computeHashes(NSURL *files,
                             LOG_ERROR("Unable to allocate hash context (for \"%s\").\n", file.path.UTF8String);
                             allGood = NO;
                         }
+                    } else if (unsupportedFileType) {
+                        LOG_DEBUG("Ignoring \"%s\" because it is a symlink.\n", file.path.UTF8String);
+                        dispatch_group_leave(dispatchGroup);
+                        dispatch_semaphore_signal(concurrencyLimiter);
+                        return;
                     } else {
                         allGood = NO;
                     }
@@ -443,10 +457,11 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
     __block BOOL same = NO;
 
-    dispatch_io_t aIO = openFile(a, aSize, YES, NULL);
+    BOOL unsupportedFileType = NO;
+    dispatch_io_t aIO = openFile(a, aSize, YES, NULL, &unsupportedFileType);
 
     if (aIO) {
-        dispatch_io_t bIO = openFile(b, aSize, YES, NULL);
+        dispatch_io_t bIO = openFile(b, aSize, YES, NULL, &unsupportedFileType);
 
         if (bIO) {
             dispatch_queue_t compareQueue = dispatch_queue_create("Compare Queue", DISPATCH_QUEUE_SERIAL);
@@ -549,8 +564,14 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
             dispatch_semaphore_wait(doneNotification, DISPATCH_TIME_FOREVER);
         } else {
+            if (unsupportedFileType) {
+                LOG_ERROR("Don't know how to compare \"%s\" - it is an unsupported type of file.\n", b.path.UTF8String);
+            }
+
             dispatch_io_close(aIO, DISPATCH_IO_STOP);
         }
+    } else if (unsupportedFileType) {
+        LOG_ERROR("Don't know how to compare \"%s\" - it is an unsupported type of file.\n", a.path.UTF8String);
     }
 
     if (fVerify) {
