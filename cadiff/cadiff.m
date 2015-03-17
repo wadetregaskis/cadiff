@@ -51,6 +51,11 @@ static int fVerify = NO;
 #define NOT_NULL(...) __attribute__((nonnull (__VA_ARGS__)))
 
 
+#ifndef countof
+#define countof(x) (sizeof(x) / sizeof(*x))
+#endif
+
+
 NSNumberFormatter *decimalFormatter = nil;
 
 
@@ -867,13 +872,13 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             dispatch_semaphore_signal(bHashingDone);
         });
 
-        while (0 != dispatch_semaphore_wait(aHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
-            showHashProgress(hashesComputedSoFar, candidateCount, startTime);
-            fflush(stdout);
-        }
-        while (0 != dispatch_semaphore_wait(bHashingDone, dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
-            showHashProgress(hashesComputedSoFar, candidateCount, startTime);
-            fflush(stdout);
+        dispatch_semaphore_t doneSemaphores[] = {aHashingDone, bHashingDone};
+
+        for (int i = 0; i < countof(doneSemaphores); ++i) {
+            while (0 != dispatch_semaphore_wait(doneSemaphores[i], dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+                showHashProgress(hashesComputedSoFar, candidateCount, startTime);
+                fflush(stdout);
+            }
         }
 
         showHashProgress(hashesComputedSoFar, candidateCount, startTime);
