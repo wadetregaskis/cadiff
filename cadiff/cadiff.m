@@ -671,9 +671,23 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
     const int seconds = (int)floor(interval);
 
     if (0 < hours) {
-        return [NSString stringWithFormat:@"%dh %dm %ds", hours, minutes, seconds];
+        if (0 < minutes) {
+            if (0 < seconds) {
+                return [NSString stringWithFormat:@"%dh %dm %ds", hours, minutes, seconds];
+            } else {
+                return [NSString stringWithFormat:@"%dh %dm", hours, minutes];
+            }
+        } else if (0 < seconds) {
+            return [NSString stringWithFormat:@"%dh %ds", hours, seconds];
+        } else {
+            return [NSString stringWithFormat:@"%dh", hours];
+        }
     } else if (0 < minutes) {
-        return [NSString stringWithFormat:@"%dm %ds", minutes, seconds];
+        if (0 < seconds) {
+            return [NSString stringWithFormat:@"%dm %ds", minutes, seconds];
+        } else {
+            return [NSString stringWithFormat:@"%dm", minutes];
+        }
     } else {
         return [NSString stringWithFormat:@"%ds", seconds];
     }
