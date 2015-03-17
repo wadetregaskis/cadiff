@@ -912,7 +912,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         __block NSInteger totalSuspects = 0;
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
-            totalSuspects += bHashesToURLs[hash].count;
+            totalSuspects += [bHashesToURLs[hash] count];  // Dot-syntax not convenient here because the target is of type id, and oddly dot-syntax requires foreknowledge of the method whereas a regular method invocation does not.
         }];
 
         if (0 < totalSuspects) {
