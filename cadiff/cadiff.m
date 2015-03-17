@@ -848,7 +848,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         NSInteger candidateCount = 0;
         countCandidates([NSSet setWithObjects:a, b, nil], syncQueue, &candidateCount);
 
-        _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, MIN(hashInputSizeLimit / 512, DIO_MAX_CHUNK_PAGES));
+        _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, MIN((unsigned int)ceil(hashInputSizeLimit / 512.0), DIO_MAX_CHUNK_PAGES));
 
         {
             NSDate *startTime = [NSDate date];
