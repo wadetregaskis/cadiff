@@ -679,6 +679,14 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
     }
 }
 
+NSString* estimatedTimeRemaining(double progress, NSDate *startTime) {
+    if ((0 <= progress) && (10 <= -[startTime timeIntervalSinceNow])) {
+        return formatTimeInterval(-[startTime timeIntervalSinceNow] * ((1 / progress) - 1));
+    } else {
+        return @"estimating time";
+    }
+}
+
 void showHashProgress(NSInteger countSoFar, NSInteger total, NSDate *startTime) {
     NSString *ofTotalString;
 
@@ -688,10 +696,11 @@ void showHashProgress(NSInteger countSoFar, NSInteger total, NSDate *startTime) 
         ofTotalString = @"";
     }
 
-    printf("\33[2K\rIndexing... %s%s candidates scanned (in %s)",
+    printf("\33[2K\rIndexing... %s%s candidates scanned (in %s - %s remaining)",
            [decimalFormatter stringFromNumber:@(countSoFar)].UTF8String,
            ofTotalString.UTF8String,
-           formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String);
+           formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String,
+           estimatedTimeRemaining(((0 < total) ? (countSoFar / (double)total) : -1), startTime).UTF8String);
 }
 
 void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
@@ -708,9 +717,7 @@ void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTim
     printf("\33[2K\r %3d%% [%-100s] %s remaining",
            dotCount,
            dots,
-           ((10 <= -[startTime timeIntervalSinceNow])
-            ? formatTimeInterval(-[startTime timeIntervalSinceNow] * ((1 / progress) - 1)).UTF8String
-            : "estimating time"));
+           estimatedTimeRemaining(progress, startTime).UTF8String);
 
     *lastProgressPrinted = dotCount;
     *lastUpdateTime = [NSDate date];
