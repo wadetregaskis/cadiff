@@ -178,7 +178,7 @@ static void recordHash(NSURL *file,
                 [errorMessage appendFormat:@"\"%@\" ", otherFile.path];
             }
 
-            LOG_ERROR("%s\n", errorMessage.UTF8String);
+            LOG_DEBUG("%s\n", errorMessage.UTF8String);
 
             [existingEntry addObject:file];
         } else {
