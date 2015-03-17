@@ -309,8 +309,10 @@ static void computeHashes(NSURL *files,
                 }
             }
 
+            // We use this to determine how aggressively to parallelise the file reading (and hashing) operations.  SSDs can handle concurrent operations much better than spindles (w.r.t. overall efficiency / throughput).
             BOOL isOnSSD = YES;
-            {
+
+            if (0 < hashInputSizeLimit) { // If we're not actually hashing the file, we don't need to worry about whether it's on an SSD or not since we won't be reading from it anyway.  We'll still be reading from the drive a little, to enumerate the directories and read file size metadata, but I suspect that's pretty much CPU- and/or kernel-bound most of the time regardless.
                 struct stat fileStat;
                 if (0 == stat(file.path.UTF8String, &fileStat)) {
                     NSNumber *devAsNumber = @(fileStat.st_dev);
