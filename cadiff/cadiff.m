@@ -848,44 +848,48 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         NSInteger candidateCount = 0;
         countCandidates([NSSet setWithObjects:a, b, nil], syncQueue, &candidateCount);
 
-        NSDate *startTime = [NSDate date];
-        dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
-        dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
-        __block BOOL successful = YES;
-        __block NSInteger hashesComputedSoFar = 0;
-
         _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, MIN(hashInputSizeLimit / 512, DIO_MAX_CHUNK_PAGES));
 
-        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
-            if (!allGood) {
-                successful = allGood;
+        {
+            NSDate *startTime = [NSDate date];
+            __block BOOL successful = YES;
+            __block NSInteger hashesComputedSoFar = 0;
+            {
+                dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
+                dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
+
+                computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
+                    if (!allGood) {
+                        successful = allGood;
+                    }
+
+                    dispatch_semaphore_signal(aHashingDone);
+                });
+
+                computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
+                    if (!allGood) {
+                        successful = allGood;
+                    }
+
+                    dispatch_semaphore_signal(bHashingDone);
+                });
+
+                dispatch_semaphore_t doneSemaphores[] = {aHashingDone, bHashingDone};
+
+                for (int i = 0; i < countof(doneSemaphores); ++i) {
+                    while (0 != dispatch_semaphore_wait(doneSemaphores[i], dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+                        showHashProgress(hashesComputedSoFar, candidateCount, startTime);
+                        fflush(stdout);
+                    }
+                }
             }
 
-            dispatch_semaphore_signal(aHashingDone);
-        });
+            showHashProgress(hashesComputedSoFar, candidateCount, startTime);
+            printf(".\n");
 
-        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
-            if (!allGood) {
-                successful = allGood;
+            if (!successful) {
+                return -1;
             }
-
-            dispatch_semaphore_signal(bHashingDone);
-        });
-
-        dispatch_semaphore_t doneSemaphores[] = {aHashingDone, bHashingDone};
-
-        for (int i = 0; i < countof(doneSemaphores); ++i) {
-            while (0 != dispatch_semaphore_wait(doneSemaphores[i], dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
-                showHashProgress(hashesComputedSoFar, candidateCount, startTime);
-                fflush(stdout);
-            }
-        }
-
-        showHashProgress(hashesComputedSoFar, candidateCount, startTime);
-        printf(".\n");
-
-        if (!successful) {
-            return -1;
         }
 
         _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, DIO_MAX_CHUNK_PAGES);
@@ -915,7 +919,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             __block NSInteger suspectsAnalysedSoFar = 0;
             printf("Comparing %s suspected duplicates...\n", [decimalFormatter stringFromNumber:@(totalSuspects)].UTF8String); fflush(stdout);
 
-            startTime = [NSDate date];
+            NSDate *startTime = [NSDate date];
 
             dispatch_group_t dispatchGroup = dispatch_group_create();
             dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
