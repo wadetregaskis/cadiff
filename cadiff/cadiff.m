@@ -300,7 +300,7 @@ static void computeHashes(NSURL *files,
 
             { // Skip folders (in the try-to-read-them-as-files sense; we will of course recurse into them to find files within.
                 if ([file getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err]) {
-                    if ([isFolder boolValue]) {
+                    if (isFolder.boolValue) {
                         LOG_DEBUG("Found subfolder \"%s\"...\n", file.path.UTF8String);
                         continue;
                     }
@@ -912,7 +912,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         __block NSInteger totalSuspects = 0;
 
         [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
-            totalSuspects += [bHashesToURLs[hash] count];
+            totalSuspects += bHashesToURLs[hash].count;
         }];
 
         if (0 < totalSuspects) {
