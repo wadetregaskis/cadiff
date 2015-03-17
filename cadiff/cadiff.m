@@ -858,6 +858,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                 dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
                 dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
 
+                // TODO:  'aHashesToURLs' isn't used anywhere else right now.  If it's not used after the N-way-compare feature is implemented, remove it (i.e. just pass nil, and update computeHashes() to silently ignore a nil argument).
                 computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
                     if (!allGood) {
                         successful = allGood;
