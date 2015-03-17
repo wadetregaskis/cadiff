@@ -309,7 +309,7 @@ static void computeHashes(NSURL *files,
                 }
             }
 
-            BOOL isOnSSD = NO;
+            BOOL isOnSSD = YES;
             {
                 struct stat fileStat;
                 if (0 == stat(file.path.UTF8String, &fileStat)) {
@@ -321,7 +321,7 @@ static void computeHashes(NSURL *files,
                         if (isSolidState(fileStat.st_dev, &isOnSSD)) {
                             volumeIsSSDCache[devAsNumber] = @(isOnSSD);
                         } else {
-                            LOG_ERROR("Unable to determine whether or not the file \"%s\" is backed by an SSD.  Conservatively assuming it's not.\n", file.path.UTF8String);
+                            LOG_ERROR("Unable to determine whether or not the file \"%s\" is backed by an SSD.  Assuming it is.\n", file.path.UTF8String);
                         }
                     }
 
