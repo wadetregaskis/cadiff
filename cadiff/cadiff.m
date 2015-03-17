@@ -264,7 +264,7 @@ static void computeHashes(NSURL *files,
 
         if (!fileEnumerator) {
             fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
-                                                includingPropertiesForKeys:@[NSURLIsDirectoryKey]
+                                                includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLFileSizeKey]
                                                                    options:kDirectoryEnumerationOptions
                                                               errorHandler:^(NSURL *url, NSError *error) {
                 LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
@@ -380,7 +380,18 @@ static void computeHashes(NSURL *files,
                     return;
                 }
 
-                const off_t fileSize = sizeOfFile(file);
+                off_t fileSize = OFF_MIN;
+
+                {
+                    NSNumber *boxedFileSize;
+                    NSError *err2;
+                    if ([file getResourceValue:&boxedFileSize forKey:NSURLFileSizeKey error:&err2]) {
+                        fileSize = boxedFileSize.unsignedLongLongValue;
+                    } else {
+                        LOG_ERROR("Unable to get size of \"%s\": %s.", file.path.UTF8String, err2.description.UTF8String);
+                    }
+                }
+
                 NSData *fileSizeAsData = [NSData dataWithBytes:&fileSize length:sizeof(fileSize)];
 
                 if (hashContext) {
