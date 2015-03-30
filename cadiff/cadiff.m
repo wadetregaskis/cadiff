@@ -245,7 +245,7 @@ static void countCandidates(NSSet *fileURLs, dispatch_queue_t syncQueue, NSInteg
     });
 }
 
-static void computeHashes(NSURL *files,
+static void computeHashes(id files, // NSURL or a container (anything that responds to -(NSEnumerator)objectEnumerator) of NSURLs.
                           size_t hashInputSizeLimit,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
@@ -259,37 +259,43 @@ static void computeHashes(NSURL *files,
         NSError *err;
         id fileEnumerator;
 
-        if ([files getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
-            if (![isFolder boolValue]) {
-                fileEnumerator = @[files];
-            }
-        } else {
-            LOG_ERROR("Unable to determine if \"%s\" is a folder or a file.  Assuming it's a folder.  Specific error was: %s\n", files.path.UTF8String, err.localizedDescription.UTF8String);
-        }
+        if ([files isKindOfClass:[NSURL class]]) {
+            NSURL *filesURL = (NSURL*)files;
 
-        if (!fileEnumerator) {
-            fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:files
-                                                includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLFileSizeKey]
-                                                                   options:kDirectoryEnumerationOptions
-                                                              errorHandler:^(NSURL *url, NSError *error) {
-                LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
-                allGood = NO;
-                return NO;
-            }];
+            if ([filesURL getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
+                if (![isFolder boolValue]) {
+                    fileEnumerator = @[filesURL];
+                }
+            } else {
+                LOG_ERROR("Unable to determine if \"%s\" is a folder or a file.  Assuming it's a folder.  Specific error was: %s\n", filesURL.path.UTF8String, err.localizedDescription.UTF8String);
+            }
 
             if (!fileEnumerator) {
-                LOG_ERROR("Unable to enumerate files in \"%s\".\n", files.path.UTF8String);
-                dispatch_async(syncQueue, ^{
-                    completionBlock(NO);
-                });
-                return;
+                fileEnumerator = [NSFileManager.defaultManager enumeratorAtURL:filesURL
+                                                    includingPropertiesForKeys:@[NSURLIsDirectoryKey, NSURLFileSizeKey]
+                                                                       options:kDirectoryEnumerationOptions
+                                                                  errorHandler:^(NSURL *url, NSError *error) {
+                                                                      LOG_ERROR("Error while enumerating files in \"%s\": %s\n", url.path.UTF8String, error.localizedDescription.UTF8String);
+                                                                      allGood = NO;
+                                                                      return NO;
+                                                                  }];
+
+                if (!fileEnumerator) {
+                    LOG_ERROR("Unable to enumerate files in \"%s\".\n", filesURL.path.UTF8String);
+                    dispatch_async(syncQueue, ^{
+                        completionBlock(NO);
+                    });
+                    return;
+                }
             }
+        } else {
+            fileEnumerator = [files objectEnumerator];
         }
 
         dispatch_semaphore_t ssdConcurrencyLimiter = dispatch_semaphore_create(fSSDConcurrencyLimit);
         dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create(fSpindleConcurrencyLimit);
         dispatch_group_t dispatchGroup = dispatch_group_create();
-        dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:files.path].UTF8String, DISPATCH_QUEUE_SERIAL);
+        dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:[files description]].UTF8String, DISPATCH_QUEUE_SERIAL);
 
         NSMutableDictionary *volumeIsSSDCache = [NSMutableDictionary dictionary];
 
@@ -708,7 +714,7 @@ NSString* estimatedTimeRemaining(double progress, NSDate *startTime) {
     }
 }
 
-void showHashProgress(NSInteger countSoFar, NSInteger total, NSDate *startTime) {
+void showHashProgress(const char *phaseName, NSInteger countSoFar, NSInteger total, NSDate *startTime) {
     NSString *ofTotalString;
 
     if (0 < total) {
@@ -717,11 +723,20 @@ void showHashProgress(NSInteger countSoFar, NSInteger total, NSDate *startTime) 
         ofTotalString = @"";
     }
 
-    printf("\33[2K\rIndexing... %s%s candidates scanned (in %s - %s remaining)",
+    NSString *timeRemainingString;
+
+    if ((0 == total) || (countSoFar != total)) {
+        timeRemainingString = [NSString stringWithFormat:@" - %@ remaining", estimatedTimeRemaining(((0 < total) ? (countSoFar / (double)total) : -1), startTime)];
+    } else {
+        timeRemainingString = @"";
+    }
+
+    printf("\33[2K\r%s... %s%s candidates scanned (in %s%s)",
+           phaseName,
            [decimalFormatter stringFromNumber:@(countSoFar)].UTF8String,
            ofTotalString.UTF8String,
            formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String,
-           estimatedTimeRemaining(((0 < total) ? (countSoFar / (double)total) : -1), startTime).UTF8String);
+           timeRemainingString.UTF8String);
 }
 
 void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
@@ -742,6 +757,58 @@ void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTim
 
     *lastProgressPrinted = dotCount;
     *lastUpdateTime = [NSDate date];
+}
+
+BOOL computeHashesForBothSides(const char *phaseName,
+                               id a, // NSURL or a container (anything that responds to -(NSEnumerator)objectEnumerator) of NSURLs.
+                               id b, // NSURL or a container (anything that responds to -(NSEnumerator)objectEnumerator) of NSURLs.
+                               size_t hashInputSizeLimit,
+                               const NSInteger *candidateCount,
+                               NSMutableDictionary *aHashesToURLs,
+                               NSMutableDictionary *bHashesToURLs,
+                               NSMutableDictionary *aURLsToHashes,
+                               NSMutableDictionary *bURLsToHashes,
+                               dispatch_queue_t syncQueue) {
+    printf("%s...", phaseName); fflush(stdout);
+
+    NSDate *startTime = [NSDate date];
+    __block BOOL successful = YES;
+    __block NSInteger hashesComputedSoFar = 0;
+    {
+        dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
+        dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
+
+        // TODO:  'aHashesToURLs' isn't used anywhere else right now.  If it's not used after the N-way-compare feature is implemented, remove it (i.e. just pass nil, and update computeHashes() to silently ignore a nil argument).
+        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
+            if (!allGood) {
+                successful = allGood;
+            }
+
+            dispatch_semaphore_signal(aHashingDone);
+        });
+
+        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
+            if (!allGood) {
+                successful = allGood;
+            }
+
+            dispatch_semaphore_signal(bHashingDone);
+        });
+
+        dispatch_semaphore_t doneSemaphores[] = {aHashingDone, bHashingDone};
+
+        for (int i = 0; i < countof(doneSemaphores); ++i) {
+            while (0 != dispatch_semaphore_wait(doneSemaphores[i], dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
+                showHashProgress(phaseName, hashesComputedSoFar, *candidateCount, startTime);
+                fflush(stdout);
+            }
+        }
+    }
+
+    showHashProgress(phaseName, hashesComputedSoFar, *candidateCount, startTime);
+    printf(".\n");
+
+    return successful;
 }
 
 int main(int argc, char* const argv[]) NOT_NULL(2) {
@@ -838,70 +905,108 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         NSURL *a = [NSURL fileURLWithPath:[[NSString stringWithUTF8String:argv[0]] stringByExpandingTildeInPath]];
         NSURL *b = [NSURL fileURLWithPath:[[NSString stringWithUTF8String:argv[1]] stringByExpandingTildeInPath]];
 
+        NSMutableSet *aFilesWithInterestingSizes = [NSMutableSet set];
+        NSMutableSet *bFilesWithInterestingSizes = [NSMutableSet set];
+
+        dispatch_queue_t syncQueue = dispatch_queue_create("Sync Queue", DISPATCH_QUEUE_SERIAL);
+
+        NSSet *aURLs, *bURLs;
+
+        {
+            NSMutableDictionary *aURLsToSizes = [NSMutableDictionary dictionary];
+            NSMutableDictionary *bURLsToSizes = [NSMutableDictionary dictionary];
+            NSMutableDictionary *aSizesToURLs = [NSMutableDictionary dictionary];
+            NSMutableDictionary *bSizesToURLs = [NSMutableDictionary dictionary];
+            NSInteger candidateCount = 0;
+            countCandidates([NSSet setWithObjects:a, b, nil], syncQueue, &candidateCount);
+
+            const BOOL successful = computeHashesForBothSides("Pre-scanning",
+                                                              a,
+                                                              b,
+                                                              0,
+                                                              &candidateCount,
+                                                              aSizesToURLs,
+                                                              bSizesToURLs,
+                                                              aURLsToSizes,
+                                                              bURLsToSizes,
+                                                              syncQueue);
+
+            if (!successful) {
+                return -1;
+            }
+
+            LOG_DEBUG("Fetched file sizes for %s files in \"%s\", and %s in \"%s\".\n",
+                      [decimalFormatter stringFromNumber:@(aURLsToSizes.count)].UTF8String,
+                      a.path.UTF8String,
+                      [decimalFormatter stringFromNumber:@(bURLsToSizes.count)].UTF8String,
+                      b.path.UTF8String);
+
+            aURLs = [aURLsToSizes keysOfEntriesWithOptions:NSEnumerationConcurrent passingTest:^BOOL(id key, id obj, BOOL *stop) {
+                return YES;
+            }];
+
+            bURLs = [bURLsToSizes keysOfEntriesWithOptions:NSEnumerationConcurrent passingTest:^BOOL(id key, id obj, BOOL *stop) {
+                return YES;
+            }];
+
+            [aSizesToURLs enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+                NSSet *aSideMatches = (NSSet*)obj;
+                NSSet *bSideMatches = bSizesToURLs[key];
+
+                // Compare if there's files on both sides with the same hash, *or* if either side has multiple matches (so that if nothing else we can highlight 'internal' duplicates, between two files on a single side).
+                if (bSideMatches || (1 < aSideMatches.count)) {
+                    [aFilesWithInterestingSizes unionSet:aSideMatches];
+                    [bFilesWithInterestingSizes unionSet:bSideMatches];
+
+                    [bSizesToURLs removeObjectForKey:key];
+                }
+            }];
+
+            // We've now enumerated all the files that might actually match *between* A and B, but for consistency (re. showing 'internal' duplicates) we also need to still include any files on B's side that, while they clearly don't match any on A, might match each other.
+            [bSizesToURLs enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+                NSSet *bSideMatches = (NSSet*)obj;
+
+                if (1 < bSideMatches.count) {
+                    [bFilesWithInterestingSizes unionSet:bSideMatches];
+                }
+            }];
+        }
+
         NSMutableDictionary *aHashesToURLs = [NSMutableDictionary dictionary];
         NSMutableDictionary *bHashesToURLs = [NSMutableDictionary dictionary];
         NSMutableDictionary *aURLsToHashes = [NSMutableDictionary dictionary];
         NSMutableDictionary *bURLsToHashes = [NSMutableDictionary dictionary];
 
-        dispatch_queue_t syncQueue = dispatch_queue_create("Sync Queue", DISPATCH_QUEUE_SERIAL);
-
-        printf("Indexing..."); fflush(stdout);
-
-        NSInteger candidateCount = 0;
-        countCandidates([NSSet setWithObjects:a, b, nil], syncQueue, &candidateCount);
-
-        _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, MIN((unsigned int)ceil(hashInputSizeLimit / 512.0), DIO_MAX_CHUNK_PAGES));
-
         {
-            NSDate *startTime = [NSDate date];
-            __block BOOL successful = YES;
-            __block NSInteger hashesComputedSoFar = 0;
-            {
-                dispatch_semaphore_t aHashingDone = dispatch_semaphore_create(0);
-                dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
+            const NSInteger candidateCount = aFilesWithInterestingSizes.count + bFilesWithInterestingSizes.count;
 
-                // TODO:  'aHashesToURLs' isn't used anywhere else right now.  If it's not used after the N-way-compare feature is implemented, remove it (i.e. just pass nil, and update computeHashes() to silently ignore a nil argument).
-                computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
-                    if (!allGood) {
-                        successful = allGood;
-                    }
+            //printf("Scanning %lld potential duplicates...", (long long)candidateCount); fflush(stdout);
 
-                    dispatch_semaphore_signal(aHashingDone);
-                });
+            _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, MIN((unsigned int)ceil(hashInputSizeLimit / 512.0), DIO_MAX_CHUNK_PAGES));
 
-                computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
-                    if (!allGood) {
-                        successful = allGood;
-                    }
-
-                    dispatch_semaphore_signal(bHashingDone);
-                });
-
-                dispatch_semaphore_t doneSemaphores[] = {aHashingDone, bHashingDone};
-
-                for (int i = 0; i < countof(doneSemaphores); ++i) {
-                    while (0 != dispatch_semaphore_wait(doneSemaphores[i], dispatch_time(DISPATCH_TIME_NOW, 333 * NSEC_PER_MSEC))) {
-                        showHashProgress(hashesComputedSoFar, candidateCount, startTime);
-                        fflush(stdout);
-                    }
-                }
-            }
-
-            showHashProgress(hashesComputedSoFar, candidateCount, startTime);
-            printf(".\n");
+            const BOOL successful = computeHashesForBothSides("Scanning",
+                                                              aFilesWithInterestingSizes,
+                                                              bFilesWithInterestingSizes,
+                                                              hashInputSizeLimit,
+                                                              &candidateCount,
+                                                              aHashesToURLs,
+                                                              bHashesToURLs,
+                                                              aURLsToHashes,
+                                                              bURLsToHashes,
+                                                              syncQueue);
 
             if (!successful) {
                 return -1;
             }
+
+            _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, DIO_MAX_CHUNK_PAGES);
+
+            LOG_DEBUG("Calculated %s hashes for \"%s\", and %s for \"%s\".\n",
+                      [decimalFormatter stringFromNumber:@(aURLsToHashes.count)].UTF8String,
+                      a.path.UTF8String,
+                      [decimalFormatter stringFromNumber:@(bURLsToHashes.count)].UTF8String,
+                      b.path.UTF8String);
         }
-
-        _dispatch_iocntl(DISPATCH_IOCNTL_CHUNK_PAGES, DIO_MAX_CHUNK_PAGES);
-
-        LOG_DEBUG("Calculated %s hashes for \"%s\", and %s for \"%s\".\n",
-                  [decimalFormatter stringFromNumber:@(aURLsToHashes.count)].UTF8String,
-                  a.path.UTF8String,
-                  [decimalFormatter stringFromNumber:@(bURLsToHashes.count)].UTF8String,
-                  b.path.UTF8String);
 
         NSMutableDictionary *aDuplicates = [NSMutableDictionary dictionary];
         NSMutableDictionary *bDuplicates = [NSMutableDictionary dictionary];
@@ -920,7 +1025,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
         if (0 < totalSuspects) {
             __block NSInteger suspectsAnalysedSoFar = 0;
-            printf("Comparing %s suspected duplicates...\n", [decimalFormatter stringFromNumber:@(totalSuspects)].UTF8String); fflush(stdout);
+            printf("Verifying %s suspected duplicates...\n", [decimalFormatter stringFromNumber:@(totalSuspects)].UTF8String); fflush(stdout);
 
             NSDate *startTime = [NSDate date];
 
@@ -974,13 +1079,13 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             printf("\n");
         }
 
-        for (NSURL *file in aURLsToHashes) {
+        for (NSURL *file in aURLs) {
             if (!aDuplicates[file]) {
                 [onlyInA addObject:file];
             }
         }
 
-        for (NSURL *file in bURLsToHashes) {
+        for (NSURL *file in bURLs) {
             if (!bDuplicates[file]) {
                 [onlyInB addObject:file];
             }
