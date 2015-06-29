@@ -201,7 +201,7 @@ static void countCandidates(NSSet *fileURLs, dispatch_queue_t syncQueue, NSInteg
             NSError *err;
 
             if ([files getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
-                if (![isFolder boolValue]) {
+                if (!isFolder.boolValue) {
                     ++countSoFar;
                     continue;
                 }
@@ -229,7 +229,7 @@ static void countCandidates(NSSet *fileURLs, dispatch_queue_t syncQueue, NSInteg
                 }
 
                 if ([file getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err]) {
-                    if (![isFolder boolValue]) {
+                    if (!isFolder.boolValue) {
                         ++countSoFar;
                         continue;
                     }
@@ -263,7 +263,7 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
             NSURL *filesURL = (NSURL*)files;
 
             if ([filesURL getResourceValue:&isFolder forKey:NSURLIsDirectoryKey error:&err] || !isFolder) {
-                if (![isFolder boolValue]) {
+                if (!isFolder.boolValue) {
                     fileEnumerator = @[filesURL];
                 }
             } else {
@@ -637,7 +637,7 @@ static NSString* prettyFormatURLSet(NSSet *set) NOT_NULL(1) {
     } else if (1 == set.count) {
         return ((NSURL*)set.anyObject).path;
     } else {
-        NSArray *sortedURLs = [[set allObjects] sortedArrayUsingFunction:compareURLs context:NULL];
+        NSArray *sortedURLs = [set.allObjects sortedArrayUsingFunction:compareURLs context:NULL];
         NSMutableString *result = [@"(" mutableCopy];
         BOOL haveFirst = NO;
 
@@ -707,8 +707,8 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
 }
 
 NSString* estimatedTimeRemaining(double progress, NSDate *startTime) {
-    if ((0 <= progress) && (10 <= -[startTime timeIntervalSinceNow])) {
-        return formatTimeInterval(-[startTime timeIntervalSinceNow] * ((1 / progress) - 1));
+    if ((0 <= progress) && (10 <= -startTime.timeIntervalSinceNow)) {
+        return formatTimeInterval(-startTime.timeIntervalSinceNow * ((1 / progress) - 1));
     } else {
         return @"estimating time";
     }
@@ -735,14 +735,14 @@ void showHashProgress(const char *phaseName, NSInteger countSoFar, NSInteger tot
            phaseName,
            [decimalFormatter stringFromNumber:@(countSoFar)].UTF8String,
            ofTotalString.UTF8String,
-           formatTimeInterval(-[startTime timeIntervalSinceNow]).UTF8String,
+           formatTimeInterval(-startTime.timeIntervalSinceNow).UTF8String,
            timeRemainingString.UTF8String);
 }
 
 void showProgressBar(double progress, int *lastProgressPrinted, NSDate *startTime, NSDate **lastUpdateTime) {
     const int dotCount = (int)(progress * 100);
 
-    if ((dotCount == *lastProgressPrinted) && ((nil == *lastUpdateTime) || (5 > -[*lastUpdateTime timeIntervalSinceNow]))) {
+    if ((dotCount == *lastProgressPrinted) && ((nil == *lastUpdateTime) || (5 > -(*lastUpdateTime).timeIntervalSinceNow))) {
         return;
     }
 
@@ -902,8 +902,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
     }
 
     @autoreleasepool {
-        NSURL *a = [NSURL fileURLWithPath:[[NSString stringWithUTF8String:argv[0]] stringByExpandingTildeInPath]];
-        NSURL *b = [NSURL fileURLWithPath:[[NSString stringWithUTF8String:argv[1]] stringByExpandingTildeInPath]];
+        NSURL *a = [NSURL fileURLWithPath:@(argv[0]).stringByExpandingTildeInPath];
+        NSURL *b = [NSURL fileURLWithPath:@(argv[1]).stringByExpandingTildeInPath];
 
         NSMutableSet *aFilesWithInterestingSizes = [NSMutableSet set];
         NSMutableSet *bFilesWithInterestingSizes = [NSMutableSet set];
