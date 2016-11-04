@@ -70,6 +70,9 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            "\t--debug\t\t\tOutput additional logging, intended for debugging.\n"
            "\t--hashInputSizeLimit\tThe maximum number of bytes to use from each file for computing its hash.  Smaller values make the \"indexing\" stage go faster, and are thus good for working with very many files or where most files are not duplicates, but increases the risk of encountering a hash collision, which will abort the program.  Defaults to 1 MiB.\n"
            "\t--help\t\t\tPrint this usage information and exit.\n"
+           "\t--showDuplicates BOOL\tWhether or not to show the full list of duplicates in the results.\n"
+           "\t--showLeftUniques BOOL\tWhether or not to show the full list of files unique to A, in the results.\n"
+           "\t--showRightUniques BOOL\tWhether or not to show the full list of files unique to B, in the results.\n"
            "\t--verify\t\tVerify the final file comparison using an additional, slower-but-known-good method.  This is in addition to the normal, fast-but-more-complicated method.  Generally this has little performance impact, if you have sufficient free memory to cache recently compared files.\n",
            invocationString);
 }
@@ -811,6 +814,26 @@ BOOL computeHashesForBothSides(const char *phaseName,
     return successful;
 }
 
+BOOL interpretAsBoolean(const char *input, BOOL *result) NOT_NULL(1, 2) {
+    if (    (0 == strcasecmp(input, "true"))
+         || (0 == strcasecmp(input, "yes"))
+         || (0 == strcasecmp(input, "yep"))
+         || (0 == strcasecmp(input, "sure"))
+         || (0 == strcasecmp(input, "yargh"))) {
+        *result = YES;
+        return YES;
+    } else if (    (0 == strcasecmp(input, "false"))
+                || (0 == strcasecmp(input, "no"))
+                || (0 == strcasecmp(input, "nope"))
+                || (0 == strcasecmp(input, "nah"))
+                || (0 == strcasecmp(input, "nargh"))) {
+        *result = NO;
+        return YES;
+    } else {
+        return NO;
+    }
+}
+
 int main(int argc, char* const argv[]) NOT_NULL(2) {
     decimalFormatter = [[NSNumberFormatter alloc] init];
     decimalFormatter.numberStyle = NSNumberFormatterDecimalStyle;
@@ -822,12 +845,18 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         {"debug",                   no_argument,        &debugLoggingEnabled,   YES},
         {"hashInputSizeLimit",      required_argument,  NULL,                   1},
         {"help",                    no_argument,        NULL,                   'h'},
+        {"showDuplicates",          required_argument,  NULL,                   5},
+        {"showLeftUniques",         required_argument,  NULL,                   6},
+        {"showRightUniques",        required_argument,  NULL,                   7},
         {"verify",                  no_argument,        &fVerify,               YES},
         {"version",                 no_argument,        NULL,                   4},
         {NULL,                      0,                  NULL,                   0}
     };
 
     size_t hashInputSizeLimit = 512;
+    BOOL showDuplicates = YES;
+    BOOL showLeftUniques = YES;
+    BOOL showRightUniques = YES;
 
     int optionIndex = 0;
     while (-1 != (optionIndex = getopt_long(argc, argv, "h", longOptions, NULL))) {
@@ -835,7 +864,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             case 0:
                 // One of our boolean flags, that sets the global variable directly.  All good.
                 break;
-            case 1: {
+            case 1: { // --hashInputSizeLimit
                 char *end = NULL;
                 hashInputSizeLimit = strtoull(optarg, &end, 0);
 
@@ -846,7 +875,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                 break;
             }
-            case 2: {
+            case 2: { // --spindleConcurrencyLimit
                 char *end = NULL;
                 fSpindleConcurrencyLimit = strtoul(optarg, &end, 0);
 
@@ -857,7 +886,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                 
                 break;
             }
-            case 3: {
+            case 3: { // --ssdConcurrencyLimit
                 char *end = NULL;
                 fSSDConcurrencyLimit = strtoul(optarg, &end, 0);
 
@@ -868,10 +897,31 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                 break;
             }
-            case 4:
+            case 4: // --version
                 printf("Source version " __TIMESTAMP__ ".\n");
                 printf("Built using " __VERSION__ " at " __TIME__ " on " __DATE__ ".\n");
                 return 0;
+            case 5: // --showDuplicates
+                if (!interpretAsBoolean(optarg, &showDuplicates)) {
+                    LOG_ERROR("Unable to interpret \"%s\" as yes or no - should be a boolean of some kind, e.g. \"yes\" or \"no\".\n", optarg);
+                    return EINVAL;
+                }
+
+                break;
+            case 6: // --showLeftUniques
+                if (!interpretAsBoolean(optarg, &showLeftUniques)) {
+                    LOG_ERROR("Unable to interpret \"%s\" as yes or no - should be a boolean of some kind, e.g. \"yes\" or \"no\".\n", optarg);
+                    return EINVAL;
+                }
+
+                break;
+            case 7: // --showRightUniques
+                if (!interpretAsBoolean(optarg, &showRightUniques)) {
+                    LOG_ERROR("Unable to interpret \"%s\" as yes or no - should be a boolean of some kind, e.g. \"yes\" or \"no\".\n", optarg);
+                    return EINVAL;
+                }
+
+                break;
             case 'h':
                 usage(argv[0]);
                 return 0;
@@ -1119,18 +1169,22 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                 [aDuplicates removeObjectForKey:lastProcessed];
             }
 
-            printf("Duplicates:\n");
+            if (showDuplicates) {
+                printf("%lu set%s of duplicates:\n", (unsigned long)duplicatePairs.count, ((1 == duplicatePairs.count) ? "" : "s"));
 
-            NSArray *sortedURLs = [duplicatePairs.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:^NSComparisonResult(NSSet *aSide, NSSet *bSide) {
-                return [prettyFormatURLSet(aSide) compare:prettyFormatURLSet(bSide)
-                                                  options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
-            }];
+                NSArray *sortedURLs = [duplicatePairs.allKeys sortedArrayWithOptions:NSSortConcurrent usingComparator:^NSComparisonResult(NSSet *aSide, NSSet *bSide) {
+                    return [prettyFormatURLSet(aSide) compare:prettyFormatURLSet(bSide)
+                                                      options:(NSCaseInsensitiveSearch | NSAnchoredSearch | NSNumericSearch | NSDiacriticInsensitiveSearch | NSWidthInsensitiveSearch)];
+                }];
 
-            [sortedURLs enumerateObjectsUsingBlock:^(NSSet *aSide, NSUInteger index, BOOL *stop) {
-                printf("\t%s <-> %s\n", prettyFormatURLSet(aSide).UTF8String, prettyFormatURLSet((NSSet*)duplicatePairs[aSide]).UTF8String);
-            }];
+                [sortedURLs enumerateObjectsUsingBlock:^(NSSet *aSide, NSUInteger index, BOOL *stop) {
+                    printf("\t%s <-> %s\n", prettyFormatURLSet(aSide).UTF8String, prettyFormatURLSet((NSSet*)duplicatePairs[aSide]).UTF8String);
+                }];
 
-            printf("\n");
+                printf("\n");
+            } else {
+                printf("%lu set%s of duplicates.\n", (unsigned long)duplicatePairs.count, ((1 == duplicatePairs.count) ? "" : "s"));
+            }
         } else {
             printf("No duplicates.\n");
         }
@@ -1141,27 +1195,39 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         };
 
         if (0 < onlyInA.count) {
-            printf("Only in \"%s\":\n", a.path.UTF8String);
+            printf("%lu unique item%s in \"%s\"", (unsigned long)onlyInA.count, ((1 == onlyInA.count) ? "" : "s"), a.path.UTF8String);
 
-            [onlyInA sortWithOptions:NSSortConcurrent usingComparator:URLComparator];
-            [onlyInA enumerateObjectsUsingBlock:^(NSURL *file, NSUInteger index, BOOL *stop) {
-                printf("\t%s\n", file.path.UTF8String);
-            }];
+            if (showLeftUniques) {
+                printf(":\n");
 
-            printf("\n");
+                [onlyInA sortWithOptions:NSSortConcurrent usingComparator:URLComparator];
+                [onlyInA enumerateObjectsUsingBlock:^(NSURL *file, NSUInteger index, BOOL *stop) {
+                    printf("\t%s\n", file.path.UTF8String);
+                }];
+
+                printf("\n");
+            } else {
+                printf(".\n");
+            }
         } else {
             printf("Nothing unique to \"%s\".\n", a.path.UTF8String);
         }
 
         if (0 < onlyInB.count) {
-            printf("Only in \"%s\":\n", b.path.UTF8String);
+            printf("%lu unique item%s in \"%s\"", (unsigned long)onlyInB.count, ((1 == onlyInB.count) ? "" : "s"), b.path.UTF8String);
 
-            [onlyInB sortWithOptions:NSSortConcurrent usingComparator:URLComparator];
-            [onlyInB enumerateObjectsUsingBlock:^(NSURL *file, NSUInteger index, BOOL *stop) {
-                printf("\t%s\n", file.path.UTF8String);
-            }];
+            if (showRightUniques) {
+                printf(":\n");
 
-            printf("\n");
+                [onlyInB sortWithOptions:NSSortConcurrent usingComparator:URLComparator];
+                [onlyInB enumerateObjectsUsingBlock:^(NSURL *file, NSUInteger index, BOOL *stop) {
+                    printf("\t%s\n", file.path.UTF8String);
+                }];
+
+                printf("\n");
+            } else {
+                printf(".\n");
+            }
         } else {
             printf("Nothing unique to \"%s\".\n", b.path.UTF8String);
         }
