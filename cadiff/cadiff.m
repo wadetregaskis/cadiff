@@ -252,7 +252,8 @@ static void countCandidates(NSSet *fileURLs, dispatch_queue_t syncQueue, NSInteg
 
 static NSData* computeVisualHash(NSURL *file, size_t hashInputSizeLimit) NOT_NULL(1) {
     NSData *hash;
-    NSDictionary *imageOptions = @{(__bridge NSString*)kCGImageSourceShouldAllowFloat: @YES};
+    NSDictionary *imageOptions = @{(__bridge NSString*)kCGImageSourceShouldAllowFloat: @YES,
+                                   (__bridge NSString*)kCGImageSourceShouldCache: @NO};
 
     CGImageSourceRef imageSource = CGImageSourceCreateWithURL((__bridge CFURLRef)file, (__bridge CFDictionaryRef)imageOptions);
 
@@ -277,7 +278,8 @@ static NSData* computeVisualHash(NSURL *file, size_t hashInputSizeLimit) NOT_NUL
                                 NSDictionary *thumbnailOptions = @{(__bridge NSString*)kCGImageSourceShouldAllowFloat: @YES,
                                                                    (__bridge NSString*)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
                                                                    (__bridge NSString*)kCGImageSourceThumbnailMaxPixelSize: @((size_t)sqrt(hashInputSizeLimit / 4)), // 4 channels, including alpha, at 8 bits each.
-                                                                   (__bridge NSString*)kCGImageSourceCreateThumbnailWithTransform: @YES};
+                                                                   (__bridge NSString*)kCGImageSourceCreateThumbnailWithTransform: @YES,
+                                                                   (__bridge NSString*)kCGImageSourceShouldCache: @NO};
 
                                 CGImageRef thumbnail = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, (__bridge CFDictionaryRef)thumbnailOptions);
 
@@ -813,7 +815,8 @@ static BOOL compareFilesVisually(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
     BOOL same = NO;
     BOOL canCompareVisually = NO;
 
-    NSDictionary *imageOptions = @{(__bridge NSImage*)kCGImageSourceShouldAllowFloat: @YES};
+    NSDictionary *imageOptions = @{(__bridge NSImage*)kCGImageSourceShouldAllowFloat: @YES,
+                                   (__bridge NSString*)kCGImageSourceShouldCache: @NO};
 
     CGImageSourceRef aImageSource = CGImageSourceCreateWithURL((__bridge CFURLRef)a, (__bridge CFDictionaryRef)imageOptions);
 
