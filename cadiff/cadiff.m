@@ -1109,7 +1109,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                 }
 
                                 ++suspectsAnalysedSoFar;
-
+                                OSMemoryBarrier();
                                 dispatch_semaphore_signal(concurrencyLimiter);
                             });
                         });
@@ -1125,6 +1125,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                 fflush(stdout);
             }
 
+            OSMemoryBarrier();
             showProgressBar((double)suspectsAnalysedSoFar / totalSuspects, &lastProgressPrinted, startTime, &lastUpdateTime);
             printf("\n");
         }
