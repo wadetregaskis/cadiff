@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		756AEF771DCCE12D0090A0EF /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 756AEF761DCCE12D0090A0EF /* CoreGraphics.framework */; };
+		756AEF791DCCEFAB0090A0EF /* ImageIO.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 756AEF781DCCEFAB0090A0EF /* ImageIO.framework */; };
 		75765584195772A40035427F /* SSD.m in Sources */ = {isa = PBXBuildFile; fileRef = 75765583195772A40035427F /* SSD.m */; };
 		75765587195789B20035427F /* System.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75765586195789B20035427F /* System.framework */; };
 		75765589195789E70035427F /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 75765588195789E70035427F /* IOKit.framework */; };
@@ -30,6 +32,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		756AEF761DCCE12D0090A0EF /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
+		756AEF781DCCEFAB0090A0EF /* ImageIO.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ImageIO.framework; path = System/Library/Frameworks/ImageIO.framework; sourceTree = SDKROOT; };
 		75765583195772A40035427F /* SSD.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = SSD.m; sourceTree = "<group>"; };
 		75765585195772FD0035427F /* SSD.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SSD.h; sourceTree = "<group>"; };
 		75765586195789B20035427F /* System.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = System.framework; path = ../../../../System/Library/Frameworks/System.framework; sourceTree = "<group>"; };
@@ -50,6 +54,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				756AEF791DCCEFAB0090A0EF /* ImageIO.framework in Frameworks */,
+				756AEF771DCCE12D0090A0EF /* CoreGraphics.framework in Frameworks */,
 				75765589195789E70035427F /* IOKit.framework in Frameworks */,
 				75765587195789B20035427F /* System.framework in Frameworks */,
 				75B27C0817F29DC400D86FDF /* Foundation.framework in Frameworks */,
@@ -79,6 +85,8 @@
 		75B27C0617F29DC400D86FDF /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				756AEF781DCCEFAB0090A0EF /* ImageIO.framework */,
+				756AEF761DCCE12D0090A0EF /* CoreGraphics.framework */,
 				75765588195789E70035427F /* IOKit.framework */,
 				75765586195789B20035427F /* System.framework */,
 				75B27C1917F2BC8700D86FDF /* libcommonCrypto.dylib */,

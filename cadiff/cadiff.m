@@ -22,6 +22,7 @@
 #include <sys/stat.h>
 
 #include <CommonCrypto/CommonDigest.h>
+#include <CoreGraphics/CoreGraphics.h>
 
 #import <Foundation/Foundation.h>
 
@@ -73,7 +74,8 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            "\t--showDuplicates BOOL\tWhether or not to show the full list of duplicates in the results.\n"
            "\t--showLeftUniques BOOL\tWhether or not to show the full list of files unique to A, in the results.\n"
            "\t--showRightUniques BOOL\tWhether or not to show the full list of files unique to B, in the results.\n"
-           "\t--verify\t\tVerify the final file comparison using an additional, slower-but-known-good method.  This is in addition to the normal, fast-but-more-complicated method.  Generally this has little performance impact, if you have sufficient free memory to cache recently compared files.\n",
+           "\t--verify\t\tVerify the final file comparison using an additional, slower-but-known-good method.  This is in addition to the normal, fast-but-more-complicated method.  Generally this has little performance impact, if you have sufficient free memory to cache recently compared files.\n"
+           "\t--visualCompare\tCompare images for visual equivalence, not byte-level equivalence.\n",
            invocationString);
 }
 
@@ -248,10 +250,107 @@ static void countCandidates(NSSet *fileURLs, dispatch_queue_t syncQueue, NSInteg
     });
 }
 
+static NSData* computeVisualHash(NSURL *file, size_t hashInputSizeLimit) NOT_NULL(1) {
+    NSData *hash;
+    NSDictionary *imageOptions = @{(__bridge NSString*)kCGImageSourceShouldAllowFloat: @YES,
+                                   (__bridge NSString*)kCGImageSourceShouldCache: @NO};
+
+    CGImageSourceRef imageSource = CGImageSourceCreateWithURL((__bridge CFURLRef)file, (__bridge CFDictionaryRef)imageOptions);
+
+    if (imageSource) {
+        CFDictionaryRef properties = CGImageSourceCopyPropertiesAtIndex(imageSource, 0, (__bridge CFDictionaryRef)imageOptions);
+
+        if (properties) {
+            CFNumberRef boxedWidth = CFDictionaryGetValue(properties, kCGImagePropertyPixelWidth);
+
+            if (boxedWidth) {
+                struct {
+                    int64_t width;
+                    int64_t height;
+                } imageSize = {0};
+
+                if (CFNumberGetValue(boxedWidth, kCFNumberSInt64Type, &imageSize.width)) {
+                    CFNumberRef boxedHeight = CFDictionaryGetValue(properties, kCGImagePropertyPixelHeight);
+
+                    if (boxedHeight) {
+                        if (CFNumberGetValue(boxedHeight, kCFNumberSInt64Type, &imageSize.height)) {
+                            if (0 < hashInputSizeLimit) {
+                                NSDictionary *thumbnailOptions = @{(__bridge NSString*)kCGImageSourceShouldAllowFloat: @YES,
+                                                                   (__bridge NSString*)kCGImageSourceCreateThumbnailFromImageAlways: @YES,
+                                                                   (__bridge NSString*)kCGImageSourceThumbnailMaxPixelSize: @((size_t)sqrt(hashInputSizeLimit / 4)), // 4 channels, including alpha, at 8 bits each.
+                                                                   (__bridge NSString*)kCGImageSourceCreateThumbnailWithTransform: @YES,
+                                                                   (__bridge NSString*)kCGImageSourceShouldCache: @NO};
+
+                                CGImageRef thumbnail = CGImageSourceCreateThumbnailAtIndex(imageSource, 0, (__bridge CFDictionaryRef)thumbnailOptions);
+
+                                if (thumbnail) {
+                                    CGColorSpaceRef colourSpace = CGColorSpaceCreateDeviceRGB();
+
+                                    if (colourSpace) {
+                                        CGContextRef bitmapContext = CGBitmapContextCreate(NULL, CGImageGetWidth(thumbnail), CGImageGetHeight(thumbnail), 8, 0, colourSpace, kCGImageAlphaPremultipliedLast);
+
+                                        if (bitmapContext) {
+                                            CGContextDrawImage(bitmapContext, CGRectMake(0, 0, CGImageGetWidth(thumbnail), CGImageGetHeight(thumbnail)), thumbnail);
+
+                                            void* imageData = CGBitmapContextGetData(bitmapContext);
+
+                                            if (imageData) {
+                                                NSMutableData *mutableHash = [NSMutableData dataWithBytes:&imageSize length:sizeof(imageSize)];
+
+                                                [mutableHash appendBytes:imageData length:CGBitmapContextGetBytesPerRow(bitmapContext) * CGBitmapContextGetHeight(bitmapContext)];
+
+                                                hash = mutableHash;
+                                            }
+
+                                            CGContextRelease(bitmapContext);
+                                        } else {
+                                            LOG_ERROR("Unable to create bitmap context for thumbnail of \"%s\".\n", file.path.UTF8String);
+                                        }
+
+                                        CGColorSpaceRelease(colourSpace);
+                                    } else {
+                                        LOG_ERROR("Unable to create device-dependent RGB colour space (to use with \"%s\").", file.path.UTF8String);
+                                    }
+
+                                    CGImageRelease(thumbnail);
+                                } else {
+                                    LOG_ERROR("Unable to create thumbnail (as hash) for \"%s\".\n", file.path.UTF8String);
+                                }
+                            } else {
+                                hash = [NSData dataWithBytes:&imageSize length:sizeof(imageSize)];
+                            }
+                        } else {
+                            LOG_ERROR("Unable to interpret image width \"%s\", for \"%s\", as an integer.\n", ((__bridge NSObject*)boxedHeight).description.UTF8String, file.path.UTF8String);
+                        }
+                    } else {
+                        LOG_ERROR("Unable to get image width of \"%s\".\n", file.path.UTF8String);
+                    }
+                } else {
+                    LOG_ERROR("Unable to interpret image width \"%s\", for \"%s\", as an integer.\n", ((__bridge NSObject*)boxedWidth).description.UTF8String, file.path.UTF8String);
+                }
+            } else {
+                LOG_ERROR("Unable to get image width of \"%s\".\n", file.path.UTF8String);
+            }
+
+            CFRelease(properties);
+        } else {
+            // Not an outright error because this is where you see the failure (as opposed to when creating the image source itself) when the source isn't a readable image.
+            LOG_DEBUG("Unable to get the image properties of \"%s\".\n", file.path.UTF8String);
+        }
+
+        CFRelease(imageSource);
+    } else {
+        LOG_ERROR("Unable to create image source from \"%s\".\n", file.path.UTF8String);
+    }
+
+    return hash;
+}
+
 static void computeHashes(id files, // NSURL or a container (anything that responds to -(NSEnumerator)objectEnumerator) of NSURLs.
                           size_t hashInputSizeLimit,
                           NSMutableDictionary *URLsToHashes,
                           NSMutableDictionary *hashesToURLs,
+                          BOOL visualCompare,
                           dispatch_queue_t syncQueue,
                           NSInteger *hashesComputedSoFar,
                           void (^completionBlock)(BOOL)) NOT_NULL(1, 3, 4) {
@@ -351,6 +450,19 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
             dispatch_group_enter(dispatchGroup);
             dispatch_async(jobQueue, ^{
                 dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+
+                if (visualCompare) {
+                    NSData *visualHashAsData = computeVisualHash(file, hashInputSizeLimit);
+
+                    if (visualHashAsData) {
+                        recordHash(file, visualHashAsData, syncQueue, URLsToHashes, hashesToURLs, dispatchGroup, hashesComputedSoFar);
+                        LOG_DEBUG("Signaling concurrency limiter %p from visual hash 'hash'%s for \"%s\".\n", concurrencyLimiter, ((0 < hashInputSizeLimit) ? "" : " length only"), file.path.UTF8String);
+                        dispatch_semaphore_signal(concurrencyLimiter);
+                        return;
+                    }
+                }
+
+                // If we reach this point, we weren't able to compute a visual hash for some reason.  So we'll fall back to just treating the file as an opaque binary blob.
 
                 dispatch_io_t fileIO;
                 CC_SHA1_CTX *hashContext = NULL;
@@ -620,6 +732,134 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
     return same;
 }
 
+static BOOL compareImages(CGImageRef imageA, CGImageRef imageB, NSURL *aURL, NSURL* bURL, BOOL *same) NOT_NULL(1, 2, 3, 4, 5) {
+    BOOL successful = NO;
+
+    if ((CGImageGetWidth(imageA) == CGImageGetWidth(imageB)) && (CGImageGetHeight(imageA) == (CGImageGetHeight(imageB)))) {
+        CGColorSpaceRef colourSpaceA = CGImageGetColorSpace(imageA);
+        CGColorSpaceRef colourSpaceB = CGImageGetColorSpace(imageB);
+
+        CGColorSpaceRef colourSpace = NULL;
+
+        if (colourSpaceA && colourSpaceB && CFEqual(colourSpaceA, colourSpaceB)) {
+            colourSpace = CGColorSpaceRetain(colourSpaceA);
+        } else {
+            colourSpace = CGColorSpaceCreateDeviceRGB();
+        }
+
+        if (colourSpace) {
+            const size_t supersetBitsPerComponent = MAX(CGImageGetBitsPerComponent(imageA), CGImageGetBitsPerComponent(imageB));
+            LOG_DEBUG("supersetBitsPerComponent = %zu (max of %zu & %zu).\n", supersetBitsPerComponent, CGImageGetBitsPerComponent(imageA), CGImageGetBitsPerComponent(imageB));
+            const CGImageAlphaInfo aAlphaInfo = CGImageGetAlphaInfo(imageA);
+            const CGImageAlphaInfo bAlphaInfo = CGImageGetAlphaInfo(imageB);
+            const BOOL alphaNeeded = (    (    (kCGImageAlphaNone != aAlphaInfo)
+                                            && (kCGImageAlphaNoneSkipLast != aAlphaInfo)
+                                            && (kCGImageAlphaNoneSkipFirst != aAlphaInfo))
+                                       || (    (kCGImageAlphaNone != bAlphaInfo)
+                                            && (kCGImageAlphaNoneSkipLast != bAlphaInfo)
+                                            && (kCGImageAlphaNoneSkipFirst != bAlphaInfo)));
+            const CGBitmapInfo supersetBitmapInfo = (   (kCGBitmapFloatComponents & (CGImageGetBitmapInfo(imageA) | CGImageGetBitmapInfo(imageB)))
+                                                      | (alphaNeeded ? kCGImageAlphaPremultipliedLast : kCGImageAlphaNoneSkipLast));
+
+            CGContextRef contextA = CGBitmapContextCreate(NULL, CGImageGetWidth(imageA), CGImageGetHeight(imageA), supersetBitsPerComponent, 0, colourSpace, supersetBitmapInfo);
+
+            if (contextA) {
+                CGContextRef contextB = CGBitmapContextCreate(NULL, CGImageGetWidth(imageB), CGImageGetHeight(imageB), supersetBitsPerComponent, 0, colourSpace, supersetBitmapInfo);
+
+                if (contextB) {
+                    CGContextDrawImage(contextA, CGRectMake(0, 0, CGImageGetWidth(imageA), CGImageGetHeight(imageA)), imageA);
+
+                    const void *dataA = CGBitmapContextGetData(contextA);
+
+                    if (dataA) {
+                        CGContextDrawImage(contextB, CGRectMake(0, 0, CGImageGetWidth(imageB), CGImageGetHeight(imageB)), imageB);
+
+                        const void *dataB = CGBitmapContextGetData(contextB);
+
+                        if (dataB) {
+                            *same = (0 == memcmp(dataA, dataB, CGBitmapContextGetBytesPerRow(contextA) * CGBitmapContextGetHeight(contextA)));
+                            successful = YES;
+                        } else {
+                            LOG_ERROR("Unable to get the bitmap image data for \"%s\".\n", bURL.path.UTF8String);
+                        }
+                    } else {
+                        LOG_ERROR("Unable to get the bitmap image data for \"%s\".\n", aURL.path.UTF8String);
+                    }
+
+                    CGContextRelease(contextB);
+                } else {
+                    LOG_ERROR("Unable to create image context for \"%s\".\n", bURL.path.UTF8String);
+                }
+
+                CGContextRelease(contextA);
+            } else {
+                LOG_ERROR("Unable to create image context for \"%s\".\n", aURL.path.UTF8String);
+            }
+
+            CGColorSpaceRelease(colourSpace);
+        } else {
+            LOG_ERROR("Unable to create device-dependent RGB colour space.\n");
+        }
+    } else {
+        LOG_DEBUG("Images \"%s\" & \"%s\" are different as they have different sizes (%zu x %zu vs %zu x %zu, respectively).\n", aURL.path.UTF8String, bURL.path.UTF8String, CGImageGetWidth(imageA), CGImageGetHeight(imageA), CGImageGetWidth(imageB), CGImageGetHeight(imageB));
+    }
+
+    return successful;
+}
+
+static BOOL compareFilesVisually(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
+    if ([a isEqual:b]) {
+        return YES;
+    }
+
+    BOOL same = NO;
+    BOOL canCompareVisually = NO;
+
+    NSDictionary *imageOptions = @{(__bridge NSImage*)kCGImageSourceShouldAllowFloat: @YES,
+                                   (__bridge NSString*)kCGImageSourceShouldCache: @NO};
+
+    CGImageSourceRef aImageSource = CGImageSourceCreateWithURL((__bridge CFURLRef)a, (__bridge CFDictionaryRef)imageOptions);
+
+    if (aImageSource) {
+        CGImageSourceRef bImageSource = CGImageSourceCreateWithURL((__bridge CFURLRef)b, (__bridge CFDictionaryRef)imageOptions);
+
+        if (bImageSource) {
+            CGImageRef aImage = CGImageSourceCreateImageAtIndex(aImageSource, 0, (__bridge CFDictionaryRef)imageOptions);
+
+            if (aImage) {
+                CGImageRef bImage = CGImageSourceCreateImageAtIndex(bImageSource, 0, (__bridge CFDictionaryRef)imageOptions);
+
+                if (bImage) {
+                    canCompareVisually = compareImages(aImage, bImage, a, b, &same);
+
+                    CGImageRelease(bImage);
+                } else {
+                    LOG_DEBUG("Unable to create image from \"%s\".\n", b.path.UTF8String);
+                }
+
+                CGImageRelease(aImage);
+            } else {
+                LOG_DEBUG("Unable to create image from \"%s\".\n", a.path.UTF8String);
+            }
+
+            CFRelease(bImageSource);
+        } else {
+            LOG_DEBUG("Unable to create image source from \"%s\".\n", b.path.UTF8String);
+        }
+
+        CFRelease(aImageSource);
+    } else {
+        LOG_DEBUG("Unable to create image source from \"%s\".\n", a.path.UTF8String);
+    }
+
+
+    if (!canCompareVisually) {
+        same = compareFiles(a, b);
+    }
+
+    return same;
+}
+
 static void addValueToKey(NSMutableDictionary *dictionary, id key, id value) NOT_NULL(1, 2, 3) {
     NSMutableSet *existingEntry = dictionary[key];
 
@@ -771,6 +1011,7 @@ BOOL computeHashesForBothSides(const char *phaseName,
                                NSMutableDictionary *bHashesToURLs,
                                NSMutableDictionary *aURLsToHashes,
                                NSMutableDictionary *bURLsToHashes,
+                               BOOL visualCompare,
                                dispatch_queue_t syncQueue) {
     printf("%s...", phaseName); fflush(stdout);
 
@@ -782,7 +1023,7 @@ BOOL computeHashesForBothSides(const char *phaseName,
         dispatch_semaphore_t bHashingDone = dispatch_semaphore_create(0);
 
         // TODO:  'aHashesToURLs' isn't used anywhere else right now.  If it's not used after the N-way-compare feature is implemented, remove it (i.e. just pass nil, and update computeHashes() to silently ignore a nil argument).
-        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
+        computeHashes(a, hashInputSizeLimit, aURLsToHashes, aHashesToURLs, visualCompare, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -790,7 +1031,7 @@ BOOL computeHashesForBothSides(const char *phaseName,
             dispatch_semaphore_signal(aHashingDone);
         });
 
-        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
+        computeHashes(b, hashInputSizeLimit, bURLsToHashes, bHashesToURLs, visualCompare, syncQueue, &hashesComputedSoFar, ^(BOOL allGood) {
             if (!allGood) {
                 successful = allGood;
             }
@@ -838,6 +1079,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
     decimalFormatter = [[NSNumberFormatter alloc] init];
     decimalFormatter.numberStyle = NSNumberFormatterDecimalStyle;
 
+    static int visualCompare = NO;
+
     static const struct option longOptions[] = {
         {"benchmark",               no_argument,        &fBenchmark,            YES},
         {"spindleConcurrencyLimit", required_argument,  NULL,                   2},
@@ -850,6 +1093,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
         {"showRightUniques",        required_argument,  NULL,                   7},
         {"verify",                  no_argument,        &fVerify,               YES},
         {"version",                 no_argument,        NULL,                   4},
+        {"visualCompare",           no_argument,        &visualCompare,         YES},
         {NULL,                      0,                  NULL,                   0}
     };
 
@@ -979,6 +1223,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                                               bSizesToURLs,
                                                               aURLsToSizes,
                                                               bURLsToSizes,
+                                                              visualCompare,
                                                               syncQueue);
 
             if (!successful) {
@@ -1043,6 +1288,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                                               bHashesToURLs,
                                                               aURLsToHashes,
                                                               bURLsToHashes,
+                                                              visualCompare,
                                                               syncQueue);
 
             if (!successful) {
@@ -1094,7 +1340,7 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                             dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
 
                             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                                if (compareFiles(file, potentialDuplicate)) {
+                                if (visualCompare ? compareFilesVisually(file, potentialDuplicate) : compareFiles(file, potentialDuplicate)) {
                                     dispatch_async(syncQueue, ^{
                                         addValueToKey(aDuplicates, file, potentialDuplicate);
                                         addValueToKey(bDuplicates, potentialDuplicate, file);
