@@ -45,7 +45,8 @@ void _dispatch_iocntl(uint32_t param, uint64_t value);
 // Flags
 static int fBenchmark = NO;
 static unsigned long fSSDConcurrencyLimit = 64; // SATA NCQ has a limit of ~32 outstanding I/Os to the actual drive.  So one might assume we need only pick something larger-enough than this to account for any overhead and additional queuing in the OS.
-static unsigned long fSpindleConcurrencyLimit = 4;
+static unsigned long fSpindleConcurrencyLimitForSmallReads = 16;
+static unsigned long fSpindleConcurrencyLimitForLargeReads = 1;
 static int fVerify = NO;
 
 
@@ -395,7 +396,7 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
         }
 
         dispatch_semaphore_t ssdConcurrencyLimiter = dispatch_semaphore_create(fSSDConcurrencyLimit);
-        dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create(fSpindleConcurrencyLimit);
+        dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create((4096 < hashInputSizeLimit) ? fSpindleConcurrencyLimitForLargeReads : fSpindleConcurrencyLimitForSmallReads);
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:[files description]].UTF8String, DISPATCH_QUEUE_SERIAL);
 
@@ -1121,9 +1122,9 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             }
             case 2: { // --spindleConcurrencyLimit
                 char *end = NULL;
-                fSpindleConcurrencyLimit = strtoul(optarg, &end, 0);
+                fSpindleConcurrencyLimitForSmallReads = fSpindleConcurrencyLimitForLargeReads = strtoul(optarg, &end, 0);
 
-                if (!end || *end || (1 > fSpindleConcurrencyLimit)) {
+                if (!end || *end || (1 > fSpindleConcurrencyLimitForSmallReads) || (1 > fSpindleConcurrencyLimitForLargeReads)) {
                     LOG_ERROR("Invalid spindle concurrency limit \"%s\" - must be a positive number.\n", optarg);
                     return EINVAL;
                 }
