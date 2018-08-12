@@ -61,6 +61,9 @@ static int fVerify = NO;
 NSNumberFormatter *decimalFormatter = nil;
 
 
+NSMutableDictionary *volumeIsSSDCache = nil;
+
+
 static void usage(const char *invocationString) NOT_NULL(1) {
     // This deliberately doesn't include all flags (e.g. those for concurrency limits) because such flags are really only intended for debugging, benchmarking, etc.
     printf("Usage: %s [FLAGS] A B\n"
@@ -78,6 +81,35 @@ static void usage(const char *invocationString) NOT_NULL(1) {
            "\t--verify\t\tVerify the final file comparison using an additional, slower-but-known-good method.  This is in addition to the normal, fast-but-more-complicated method.  Generally this has little performance impact, if you have sufficient free memory to cache recently compared files.\n"
            "\t--visualCompare\tCompare images for visual equivalence, not byte-level equivalence.\n",
            invocationString);
+}
+
+static BOOL isFileOnSSD(NSURL *file) {
+    BOOL result = YES; // Assume yes by default, i.e. in cases where we cannot determine it.
+
+    struct stat fileStat;
+    if (0 == stat(file.path.UTF8String, &fileStat)) {
+        NSNumber *devAsNumber = @(fileStat.st_dev);
+
+        if (volumeIsSSDCache[devAsNumber]) {
+            result = ((NSNumber*)volumeIsSSDCache[devAsNumber]).boolValue;
+        } else {
+            if (isSolidState(fileStat.st_dev, &result)) {
+                volumeIsSSDCache[devAsNumber] = @(result);
+            } else {
+                LOG_ERROR("Unable to determine whether or not the file \"%s\" is backed by an SSD.  Assuming it is.\n", file.path.UTF8String);
+            }
+        }
+
+        LOG_DEBUG("File \"%s\" on volume (%u, %u) is %sliving on an SSD.\n",
+                  file.path.UTF8String,
+                  major(fileStat.st_dev),
+                  minor(fileStat.st_dev),
+                  (result ? "" : "not "));
+    } else {
+        LOG_ERROR("Unable to determine the volume dev# of \"%s\" (in order to optimise I/Os to it), error: (%d) %s\n", file.path.UTF8String, errno, strerror(errno));
+    }
+
+    return result;
 }
 
 static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL cache, dispatch_semaphore_t concurrencyLimiter, BOOL *unsupportedFileType) {
@@ -400,8 +432,6 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
         dispatch_group_t dispatchGroup = dispatch_group_create();
         dispatch_queue_t jobQueue = dispatch_queue_create([@"Hash Job Queue for " stringByAppendingString:[files description]].UTF8String, DISPATCH_QUEUE_SERIAL);
 
-        NSMutableDictionary *volumeIsSSDCache = [NSMutableDictionary dictionary];
-
         for (NSURL *file in fileEnumerator) {
             if (!allGood) {
                 break;
@@ -419,33 +449,8 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
             }
 
             // We use this to determine how aggressively to parallelise the file reading (and hashing) operations.  SSDs can handle concurrent operations much better than spindles (w.r.t. overall efficiency / throughput).
-            BOOL isOnSSD = YES;
-
-            if (0 < hashInputSizeLimit) { // If we're not actually hashing the file, we don't need to worry about whether it's on an SSD or not since we won't be reading from it anyway.  We'll still be reading from the drive a little, to enumerate the directories and read file size metadata, but I suspect that's pretty much CPU- and/or kernel-bound most of the time regardless.
-                struct stat fileStat;
-                if (0 == stat(file.path.UTF8String, &fileStat)) {
-                    NSNumber *devAsNumber = @(fileStat.st_dev);
-
-                    if (volumeIsSSDCache[devAsNumber]) {
-                        isOnSSD = ((NSNumber*)volumeIsSSDCache[devAsNumber]).boolValue;
-                    } else {
-                        if (isSolidState(fileStat.st_dev, &isOnSSD)) {
-                            volumeIsSSDCache[devAsNumber] = @(isOnSSD);
-                        } else {
-                            LOG_ERROR("Unable to determine whether or not the file \"%s\" is backed by an SSD.  Assuming it is.\n", file.path.UTF8String);
-                        }
-                    }
-
-                    LOG_DEBUG("File \"%s\" on volume (%u, %u) is %sliving on an SSD.\n",
-                              file.path.UTF8String,
-                              major(fileStat.st_dev),
-                              minor(fileStat.st_dev),
-                              (isOnSSD ? "" : "not "));
-                } else {
-                    LOG_ERROR("Unable to determine the volume dev# of \"%s\" (in order to optimise I/Os to it), error: (%d) %s\n", file.path.UTF8String, errno, strerror(errno));
-                }
-            }
-
+            // If we're not actually hashing the file, we don't need to worry about whether it's on an SSD or not since we won't be reading from it anyway.  We'll still be reading from the drive a little, to enumerate the directories and read file size metadata, but I suspect that's pretty much CPU- and/or kernel-bound most of the time regardless.
+            const BOOL isOnSSD = (0 >= hashInputSizeLimit) || isFileOnSSD(file);
             dispatch_semaphore_t concurrencyLimiter = (isOnSSD ? ssdConcurrencyLimiter : spindleConcurrencyLimiter);
 
             dispatch_group_enter(dispatchGroup);
@@ -1080,6 +1085,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
     decimalFormatter = [[NSNumberFormatter alloc] init];
     decimalFormatter.numberStyle = NSNumberFormatterDecimalStyle;
 
+    volumeIsSSDCache = [NSMutableDictionary dictionary];
+
     static int visualCompare = NO;
 
     static const struct option longOptions[] = {
@@ -1327,7 +1334,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             NSDate *startTime = [NSDate date];
 
             dispatch_group_t dispatchGroup = dispatch_group_create();
-            dispatch_semaphore_t concurrencyLimiter = dispatch_semaphore_create(4);
+            dispatch_semaphore_t ssdConcurrencyLimiter = dispatch_semaphore_create(32); // Max size of SATA NCQ.
+            dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create(1);
 
             [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
                 NSSet *potentialDuplicates = bHashesToURLs[hash];
@@ -1338,6 +1346,10 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                         dispatch_group_enter(dispatchGroup);
                         dispatch_async(syncQueue, ^{
+                            dispatch_semaphore_t concurrencyLimiter = ((isFileOnSSD(file) && isFileOnSSD(potentialDuplicate))
+                                                                       ? ssdConcurrencyLimiter
+                                                                       : spindleConcurrencyLimiter);
+
                             dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
 
                             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
