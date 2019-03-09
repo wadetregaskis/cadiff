@@ -112,7 +112,7 @@ static BOOL isFileOnSSD(NSURL *file) {
     return result;
 }
 
-static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL cache, dispatch_semaphore_t concurrencyLimiter, BOOL *unsupportedFileType) {
+static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL cache, dispatch_semaphore_t concurrencyLimiter, BOOL *unsupportedFileType) NOT_NULL(1, 4, 5) {
     const int fd = open(file.path.UTF8String, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
 
     *unsupportedFileType = NO;
@@ -163,10 +163,8 @@ static dispatch_io_t openFile(NSURL *file, size_t expectedExtentOfReading, BOOL 
                                                                   errno, strerror(errno));
                                                   }
 
-                                                  if (concurrencyLimiter) {
-                                                      LOG_DEBUG("Signaling concurrency limiter %p from close handler for \"%s\".\n", concurrencyLimiter, file.path.UTF8String);
-                                                      dispatch_semaphore_signal(concurrencyLimiter);
-                                                  }
+                                                  LOG_DEBUG("Signaling concurrency limiter %p from close handler for \"%s\".\n", concurrencyLimiter, file.path.UTF8String);
+                                                  dispatch_semaphore_signal(concurrencyLimiter);
                                               });
 
     if (!fileIO) {
@@ -603,24 +601,28 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
     });
 }
 
-static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
+static BOOL compareFiles(NSURL *a, NSURL *b, dispatch_semaphore_t concurrencyLimiter) NOT_NULL(1, 2, 3) {
     if ([a isEqual:b]) {
+        dispatch_semaphore_signal(concurrencyLimiter);
         return YES;
     }
 
     const off_t aSize = sizeOfFile(a);
 
     if ((0 > aSize) || (aSize != sizeOfFile(b))) {
+        dispatch_semaphore_signal(concurrencyLimiter);
         return NO;
     }
 
     __block BOOL same = NO;
 
     BOOL unsupportedFileType = NO;
-    dispatch_io_t aIO = openFile(a, aSize, YES, NULL, &unsupportedFileType);
+
+    dispatch_semaphore_t concurrencyLimiterMultiplexer = dispatch_semaphore_create(0);
+    dispatch_io_t aIO = openFile(a, aSize, YES, concurrencyLimiterMultiplexer, &unsupportedFileType);
 
     if (aIO) {
-        dispatch_io_t bIO = openFile(b, aSize, YES, NULL, &unsupportedFileType);
+        dispatch_io_t bIO = openFile(b, aSize, YES, concurrencyLimiterMultiplexer, &unsupportedFileType);
 
         if (bIO) {
             dispatch_queue_t compareQueue = dispatch_queue_create("Compare Queue", DISPATCH_QUEUE_SERIAL);
@@ -726,6 +728,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                              });
 
             dispatch_semaphore_wait(doneNotification, DISPATCH_TIME_FOREVER);
+            dispatch_semaphore_wait(concurrencyLimiterMultiplexer, DISPATCH_TIME_FOREVER);
         } else {
             if (unsupportedFileType) {
                 LOG_ERROR("Don't know how to compare \"%s\" - it is an unsupported type of file.\n", b.path.UTF8String);
@@ -733,6 +736,8 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
 
             dispatch_io_close(aIO, DISPATCH_IO_STOP);
         }
+
+        dispatch_semaphore_wait(concurrencyLimiterMultiplexer, DISPATCH_TIME_FOREVER);
     } else if (unsupportedFileType) {
         LOG_ERROR("Don't know how to compare \"%s\" - it is an unsupported type of file.\n", a.path.UTF8String);
     }
@@ -740,6 +745,8 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
     if (fVerify) {
         assert(same == [NSFileManager.defaultManager contentsEqualAtPath:a.path andPath:b.path]);
     }
+
+    dispatch_semaphore_signal(concurrencyLimiter);
 
     return same;
 }
@@ -819,8 +826,9 @@ static BOOL compareImages(CGImageRef imageA, CGImageRef imageB, NSURL *aURL, NSU
     return successful;
 }
 
-static BOOL compareFilesVisually(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
+static BOOL compareFilesVisually(NSURL *a, NSURL *b, dispatch_semaphore_t concurrencyLimiter) NOT_NULL(1, 2, 3) {
     if ([a isEqual:b]) {
+        dispatch_semaphore_signal(concurrencyLimiter);
         return YES;
     }
 
@@ -864,9 +872,10 @@ static BOOL compareFilesVisually(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
         LOG_DEBUG("Unable to create image source from \"%s\".\n", a.path.UTF8String);
     }
 
-
     if (!canCompareVisually) {
-        same = compareFiles(a, b);
+        same = compareFiles(a, b, concurrencyLimiter);
+    } else {
+        dispatch_semaphore_signal(concurrencyLimiter);
     }
 
     return same;
@@ -1359,7 +1368,13 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                             LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
 
                             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                                if (visualCompare ? compareFilesVisually(file, potentialDuplicate) : compareFiles(file, potentialDuplicate)) {
+                                LOG_DEBUG("[async] Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
+
+                                if (visualCompare
+                                    ? compareFilesVisually(file, potentialDuplicate, concurrencyLimiter)
+                                    : compareFiles(file, potentialDuplicate, concurrencyLimiter)) {
+                                    LOG_DEBUG("[async] Verified duplicity of \"%s\" and \"%s\".\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
+
                                     dispatch_async(syncQueue, ^{
                                         addValueToKey(aDuplicates, file, potentialDuplicate);
                                         addValueToKey(bDuplicates, potentialDuplicate, file);
@@ -1375,7 +1390,6 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                                 ++suspectsAnalysedSoFar;
                                 OSMemoryBarrier();
-                                dispatch_semaphore_signal(concurrencyLimiter);
                             });
                         });
                     }
