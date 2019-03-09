@@ -700,6 +700,10 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                                      }
                                      dispatch_semaphore_signal(doneNotification);
                                  }
+
+                                 if (done) {
+                                     dispatch_io_close(aIO, DISPATCH_IO_STOP);
+                                 }
                              });
 
             dispatch_io_read(bIO,
@@ -714,6 +718,10 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                                          LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), b.path.UTF8String);
                                      }
                                      dispatch_semaphore_signal(doneNotification);
+                                 }
+
+                                 if (done) {
+                                     dispatch_io_close(bIO, DISPATCH_IO_STOP);
                                  }
                              });
 
