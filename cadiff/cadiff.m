@@ -693,9 +693,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                              dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0),
                              ^(bool done, dispatch_data_t data, int error) {
                                  if (0 == error) {
-                                     dispatch_async(compareQueue, ^{
-                                         ioHandler(data, done, a);
-                                     });
+                                     ioHandler(data, done, a);
                                  } else {
                                      if (ECANCELED != error) {
                                          LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), a.path.UTF8String);
@@ -710,9 +708,7 @@ static BOOL compareFiles(NSURL *a, NSURL *b) NOT_NULL(1, 2) {
                              dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0),
                              ^(bool done, dispatch_data_t data, int error) {
                                  if (0 == error) {
-                                     dispatch_async(compareQueue, ^{
-                                         ioHandler(data, done, b);
-                                     });
+                                     ioHandler(data, done, b);
                                  } else {
                                      if (ECANCELED != error) {
                                          LOG_ERROR("Error %d (%s) while reading from \"%s\".\n", error, strerror(error), b.path.UTF8String);
