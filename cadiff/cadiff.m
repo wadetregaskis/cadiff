@@ -493,6 +493,8 @@ static void computeHashes(id files, // NSURL or a container (anything that respo
                     } else if (unsupportedFileType) {
                         LOG_DEBUG("Ignoring \"%s\" because it is a symlink.\n", file.path.UTF8String);
                         dispatch_group_leave(dispatchGroup);
+
+                        LOG_DEBUG("Signaling concurrency limiter %p after file \"%s\" was discovered to be a symlink.", concurrencyLimiter, file.path.UTF8String);
                         dispatch_semaphore_signal(concurrencyLimiter);
                         return;
                     } else {
