@@ -962,7 +962,7 @@ NSString* formatTimeInterval(NSTimeInterval interval) {
 }
 
 NSString* estimatedTimeRemaining(double progress, NSDate *startTime) {
-    if ((0 <= progress) && (10 <= -startTime.timeIntervalSinceNow)) {
+    if ((0 < progress) && (10 <= -startTime.timeIntervalSinceNow)) {
         return formatTimeInterval(-startTime.timeIntervalSinceNow * ((1 / progress) - 1));
     } else {
         return @"estimating time";
