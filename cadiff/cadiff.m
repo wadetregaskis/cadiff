@@ -1340,8 +1340,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
             NSDate *startTime = [NSDate date];
 
             dispatch_group_t dispatchGroup = dispatch_group_create();
-            dispatch_semaphore_t ssdConcurrencyLimiter = dispatch_semaphore_create(32); // Max size of SATA NCQ.
-            dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create(1);
+            dispatch_semaphore_t ssdConcurrencyLimiter = dispatch_semaphore_create(fSSDConcurrencyLimit);
+            dispatch_semaphore_t spindleConcurrencyLimiter = dispatch_semaphore_create(fSpindleConcurrencyLimitForLargeReads);
 
             [aURLsToHashes enumerateKeysAndObjectsUsingBlock:^(NSURL *file, NSData *hash, BOOL *stop) {
                 NSSet *potentialDuplicates = bHashesToURLs[hash];
