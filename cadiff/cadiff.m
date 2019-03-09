@@ -1348,8 +1348,6 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
 
                 if (potentialDuplicates) {
                     for (NSURL *potentialDuplicate in potentialDuplicates) {
-                        LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
-
                         dispatch_group_enter(dispatchGroup);
                         dispatch_async(syncQueue, ^{
                             dispatch_semaphore_t concurrencyLimiter = ((isFileOnSSD(file) && isFileOnSSD(potentialDuplicate))
@@ -1357,6 +1355,8 @@ int main(int argc, char* const argv[]) NOT_NULL(2) {
                                                                        : spindleConcurrencyLimiter);
 
                             dispatch_semaphore_wait(concurrencyLimiter, DISPATCH_TIME_FOREVER);
+
+                            LOG_DEBUG("Verifying duplicity of \"%s\" and \"%s\"...\n", file.path.UTF8String, potentialDuplicate.path.UTF8String);
 
                             dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
                                 if (visualCompare ? compareFilesVisually(file, potentialDuplicate) : compareFiles(file, potentialDuplicate)) {
